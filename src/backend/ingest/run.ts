@@ -22,7 +22,7 @@ export type IngestResult = {
   errors: string[];
 };
 
-export async function runIngest(env: { DB: D1Database; AI: Ai }, db: Db): Promise<IngestResult> {
+export async function runIngest(env: CloudflareBindings, db: Db): Promise<IngestResult> {
   const ingestStarted = performance.now();
   const result: IngestResult = {
     fetched: 0,

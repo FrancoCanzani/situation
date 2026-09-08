@@ -13,7 +13,6 @@ const polishSchema = z.object({
 });
 
 const POLISH_MODEL = "@cf/zai-org/glm-4.7-flash";
-const POLISH_TIMEOUT_MS = 25_000;
 const POLISH_MAX_TOKENS = 200;
 
 export type PolishResult = z.infer<typeof polishSchema>;
@@ -32,7 +31,6 @@ export async function pingPolishModel(ai: Ai): Promise<{ text: string; ms: numbe
     prompt: "Reply with the single word pong.",
     maxRetries: 0,
     maxOutputTokens: 8,
-    abortSignal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
   });
   return { text: text.trim(), ms: Math.round(performance.now() - started) };
 }
@@ -47,7 +45,6 @@ export async function polishArticle(
   try {
     const { output, usage, finishReason } = await generateText({
       model: polishModel(ai),
-      abortSignal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
       maxRetries: 0,
       maxOutputTokens: POLISH_MAX_TOKENS,
       output: Output.object({

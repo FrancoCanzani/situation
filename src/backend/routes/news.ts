@@ -1,17 +1,11 @@
 import { and, desc, eq, lt, or, SQL } from "drizzle-orm";
 import { Hono } from "hono";
 
-import type { Db } from "../db";
+import { createDb } from "../db";
 import { articles } from "../db/schema";
 import { sourceName } from "../ingest/feeds";
 import type { ArticleDto, Category, NewsPage, Sentiment } from "../../shared/types";
 import { CATEGORIES } from "../../shared/types";
-
-type Env = {
-  Variables: {
-    db: Db;
-  };
-};
 
 function encodeCursor(publishedAt: Date, id: string): string {
   return `${publishedAt.getTime()}_${id}`;
@@ -42,9 +36,10 @@ function toDto(row: typeof articles.$inferSelect): ArticleDto {
   };
 }
 
-export const newsRoutes = new Hono<Env>();
+export const newsRoutes = new Hono<{ Bindings: CloudflareBindings }>();
 
 newsRoutes.get("/", async (c) => {
+  const db = createDb(c.env.DB);
   const limitRaw = Number(c.req.query("limit") ?? "30");
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 30;
   const cursor = decodeCursor(c.req.query("cursor") ?? undefined);
@@ -63,7 +58,7 @@ newsRoutes.get("/", async (c) => {
     );
   }
 
-  const rows = await c.var.db
+  const rows = await db
     .select()
     .from(articles)
     .where(and(...filters))
@@ -83,7 +78,8 @@ newsRoutes.get("/", async (c) => {
 
 newsRoutes.get("/:id", async (c) => {
   const id = c.req.param("id");
-  const [row] = await c.var.db
+  const db = createDb(c.env.DB);
+  const [row] = await db
     .select()
     .from(articles)
     .where(and(eq(articles.id, id), eq(articles.keep, true)))

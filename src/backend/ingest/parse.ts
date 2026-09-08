@@ -1,4 +1,5 @@
-import { XMLParser } from "fast-xml-parser";
+import { isValid } from "date-fns";
+import { parseFeed } from "feedsmith";
 
 export type ParsedItem = {
   title: string;
@@ -7,41 +8,15 @@ export type ParsedItem = {
   publishedAt: Date;
 };
 
-const parser = new XMLParser({
-  ignoreAttributes: false,
-  attributeNamePrefix: "@_",
-  trimValues: true,
-});
-
 const SKIP_PATH =
   /\/(opinion|opinions|recipe|recipes|lifestyle|food|horoscope|comics|crossword|games|video\/)\b/i;
 
 const LISTICLE = /^\s*\d+\s+(ways|things|tips|reasons|best|worst)\b/i;
 
-function asArray<T>(value: T | T[] | undefined): T[] {
-  if (!value) return [];
-  return Array.isArray(value) ? value : [value];
-}
-
-function pickLink(item: Record<string, unknown>): string {
-  const link = item.link;
-  if (typeof link === "string") return link.trim();
-  if (link && typeof link === "object") {
-    const node = link as Record<string, unknown>;
-    if (typeof node["@_href"] === "string") return node["@_href"].trim();
-    if (typeof node["#text"] === "string") return node["#text"].trim();
-  }
-  const guid = item.guid;
-  if (typeof guid === "string" && /^https?:\/\//i.test(guid)) return guid.trim();
-  if (guid && typeof guid === "object") {
-    const node = guid as Record<string, unknown>;
-    if (typeof node["#text"] === "string" && /^https?:\/\//i.test(node["#text"])) {
-      return node["#text"].trim();
-    }
-  }
-  const id = item.id;
-  if (typeof id === "string" && /^https?:\/\//i.test(id)) return id.trim();
-  return "";
+function httpUrl(value: string | undefined): string | undefined {
+  const url = value?.trim();
+  if (url && /^https?:\/\//i.test(url)) return url;
+  return undefined;
 }
 
 function stripHtml(value: string): string {
@@ -55,34 +30,10 @@ function stripHtml(value: string): string {
     .trim();
 }
 
-function pickSummary(item: Record<string, unknown>): string {
-  const candidates = [item.description, item.summary, item["content:encoded"], item.content];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return stripHtml(candidate).slice(0, 2000);
-    }
-    if (candidate && typeof candidate === "object") {
-      const text = (candidate as Record<string, unknown>)["#text"];
-      if (typeof text === "string" && text.trim()) {
-        return stripHtml(text).slice(0, 2000);
-      }
-    }
-  }
-  return "";
-}
-
-function pickDate(item: Record<string, unknown>): Date {
-  const raw =
-    item.pubDate ??
-    item.published ??
-    item.updated ??
-    item["dc:date"] ??
-    item["dcterms:modified"];
-  if (typeof raw === "string" || typeof raw === "number") {
-    const date = new Date(raw);
-    if (!Number.isNaN(date.getTime())) return date;
-  }
-  return new Date();
+function toDate(raw: string | undefined): Date {
+  if (!raw) return new Date();
+  const date = new Date(raw);
+  return isValid(date) ? date : new Date();
 }
 
 function shouldSkipHeuristically(title: string, url: string): boolean {
@@ -91,43 +42,82 @@ function shouldSkipHeuristically(title: string, url: string): boolean {
   return false;
 }
 
-export function parseFeedXml(xml: string): ParsedItem[] {
-  const doc = parser.parse(xml) as Record<string, unknown>;
-  const channel = (doc.rss as Record<string, unknown> | undefined)?.channel as
-    | Record<string, unknown>
-    | undefined;
-  const atomFeed = doc.feed as Record<string, unknown> | undefined;
-  const rdf = doc["rdf:RDF"] as Record<string, unknown> | undefined;
-
-  const items = [
-    ...asArray(channel?.item as Record<string, unknown> | undefined),
-    ...asArray(atomFeed?.entry as Record<string, unknown> | undefined),
-    ...asArray(rdf?.item as Record<string, unknown> | undefined),
-  ];
-
-  const out: ParsedItem[] = [];
-  for (const raw of items) {
-    const item = raw as Record<string, unknown>;
-    const titleNode = item.title;
-    const title =
-      typeof titleNode === "string"
-        ? stripHtml(titleNode)
-        : titleNode &&
-            typeof titleNode === "object" &&
-            typeof (titleNode as { "#text"?: string })["#text"] === "string"
-          ? stripHtml((titleNode as { "#text": string })["#text"])
-          : "";
-    const url = pickLink(item);
-    if (!title || !url || !/^https?:\/\//i.test(url)) continue;
-    if (shouldSkipHeuristically(title, url)) continue;
-    out.push({
+function toParsedItem(raw: {
+  title?: string;
+  url?: string;
+  summary?: string;
+  publishedAt?: string;
+}): ParsedItem[] {
+  const title = stripHtml(raw.title ?? "");
+  const url = httpUrl(raw.url);
+  if (!title || !url) return [];
+  if (shouldSkipHeuristically(title, url)) return [];
+  return [
+    {
       title,
       url,
-      rawSummary: pickSummary(item),
-      publishedAt: pickDate(item),
-    });
+      rawSummary: stripHtml(raw.summary ?? "").slice(0, 2000),
+      publishedAt: toDate(raw.publishedAt),
+    },
+  ];
+}
+
+function atomUrl(
+  links: Array<{ href?: string; rel?: string }> | undefined,
+  id?: string,
+): string | undefined {
+  const alternate = links?.find((link) => link.rel === "alternate");
+  return httpUrl(alternate?.href) ?? httpUrl(links?.[0]?.href) ?? httpUrl(id);
+}
+
+export function parseFeedXml(xml: string): ParsedItem[] {
+  const parsed = parseFeed(xml);
+  switch (parsed.format) {
+    case "rss":
+      return (parsed.feed.items ?? []).flatMap((item) =>
+        toParsedItem({
+          title: item.title,
+          url:
+            httpUrl(item.link) ??
+            (item.guid?.isPermaLink === false ? undefined : httpUrl(item.guid?.value)) ??
+            atomUrl(item.atom?.links, item.atom?.id),
+          summary: item.content?.encoded ?? item.description ?? item.dc?.descriptions?.[0],
+          publishedAt: item.pubDate ?? item.dc?.dates?.[0] ?? item.dcterms?.dates?.[0],
+        }),
+      );
+    case "atom":
+      return (parsed.feed.entries ?? []).flatMap((entry) =>
+        toParsedItem({
+          title: entry.title,
+          url: atomUrl(entry.links, entry.id),
+          summary: entry.summary ?? entry.content ?? entry.dc?.descriptions?.[0],
+          publishedAt:
+            entry.published ?? entry.updated ?? entry.dc?.dates?.[0] ?? entry.dcterms?.dates?.[0],
+        }),
+      );
+    case "rdf":
+      return (parsed.feed.items ?? []).flatMap((item) =>
+        toParsedItem({
+          title: item.title,
+          url: item.link,
+          summary: item.content?.encoded ?? item.description ?? item.dc?.descriptions?.[0],
+          publishedAt: item.dc?.dates?.[0] ?? item.dcterms?.dates?.[0],
+        }),
+      );
+    case "json":
+      return (parsed.feed.items ?? []).flatMap((item) =>
+        toParsedItem({
+          title: item.title,
+          url: item.url ?? item.external_url ?? item.id,
+          summary: item.content_text ?? item.summary ?? item.content_html,
+          publishedAt: item.date_published ?? item.date_modified,
+        }),
+      );
+    default: {
+      const _never: never = parsed;
+      return _never;
+    }
   }
-  return out;
 }
 
 export async function hashUrl(url: string): Promise<string> {

@@ -1,23 +1,11 @@
 import { Hono } from "hono";
 
-import { createDb, type Db } from "./db";
+import { createDb } from "./db";
 import { pingPolishModel } from "./ingest/polish";
 import { runIngest } from "./ingest/run";
 import { newsRoutes } from "./routes/news";
 
-type AppEnv = {
-  Bindings: Env;
-  Variables: {
-    db: Db;
-  };
-};
-
-const app = new Hono<AppEnv>();
-
-app.use("/api/*", async (c, next) => {
-  c.set("db", createDb(c.env.DB));
-  await next();
-});
+const app = new Hono<{ Bindings: CloudflareBindings }>();
 
 app.route("/api/news", newsRoutes);
 
@@ -52,7 +40,7 @@ function inspectPingError(error: unknown): string {
 
 let ingestRunning = false;
 
-async function runCronIngest(env: Env) {
+async function runCronIngest(env: CloudflareBindings) {
   if (ingestRunning) {
     console.log("[cron] skip, already running");
     return { alreadyRunning: true as const };
@@ -75,7 +63,7 @@ async function runCronIngest(env: Env) {
 export default {
   fetch: app.fetch,
 
-  async scheduled(_controller: ScheduledController, env: Env) {
+  async scheduled(_controller: ScheduledController, env: CloudflareBindings) {
     await runCronIngest(env);
   },
 };

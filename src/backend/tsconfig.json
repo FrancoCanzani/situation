@@ -13,11 +13,11 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["@cloudflare/workers-types", "./worker-configuration.d.ts"],
+    "types": ["../../worker-configuration.d.ts", "node"],
     "paths": {
-      "@backend/*": ["./src/backend/*"],
-      "@shared/*": ["./src/shared/*"]
+      "@backend/*": ["./*"],
+      "@shared/*": ["../shared/*"]
     }
   },
-  "include": ["src/backend", "src/shared", "worker-configuration.d.ts"]
+  "include": [".", "../shared", "../../worker-configuration.d.ts"]
 }
