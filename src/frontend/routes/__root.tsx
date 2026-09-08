@@ -10,9 +10,5 @@ export const Route = createRootRoute({
 });
 
 function RootLayout() {
-  return (
-    <div className="mx-auto flex min-h-svh w-full max-w-5xl flex-col px-4 py-5 antialiased">
-      <Outlet />
-    </div>
-  );
+  return <Outlet />;
 }

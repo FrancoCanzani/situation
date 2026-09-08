@@ -14,6 +14,7 @@ const polishSchema = z.object({
 
 const POLISH_MODEL = "@cf/zai-org/glm-4.7-flash";
 const POLISH_MAX_TOKENS = 200;
+const POLISH_TIMEOUT_MS = 8_000;
 
 export type PolishResult = z.infer<typeof polishSchema>;
 
@@ -38,85 +39,66 @@ export async function pingPolishModel(ai: Ai): Promise<{ text: string; ms: numbe
 export async function polishArticle(
   ai: Ai,
   input: { title: string; rawSummary: string; source: string },
-): Promise<PolishResult | null> {
-  const started = performance.now();
-  console.log("[polish] start binding", POLISH_MODEL, input.source, input.title);
-
-  try {
-    const { output, usage, finishReason } = await generateText({
-      model: polishModel(ai),
-      maxRetries: 0,
-      maxOutputTokens: POLISH_MAX_TOKENS,
-      output: Output.object({
-        name: "ArticlePolish",
-        description: "Classify and clean a news headline for a world news wire.",
-        schema: polishSchema,
-      }),
+): Promise<PolishResult> {
+  const { output, finishReason } = await generateText({
+    model: polishModel(ai),
+    maxRetries: 0,
+    maxOutputTokens: POLISH_MAX_TOKENS,
+    abortSignal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
+    output: Output.object({
+      name: "ArticlePolish",
+      description: "Gate a headline for a world news wire: keep or discard.",
+      schema: polishSchema,
+    }),
       prompt: [
-        "You clean news for Situation, a world-important news wire.",
-        "Return structured JSON only.",
+        "You gate news for Situation, a world-important news wire.",
+        "Return structured JSON only. Do not rewrite the headline.",
         "",
-        "keep=false for: opinion/op-eds, recipes, lifestyle, listicles, product roundups,",
-        "celebrity gossip, fantasy sports tips, betting SEO, pure analysis without a news event.",
-        "keep=true for factual reported news (who/what/where/when).",
+        "keep=true only for a reported news event: something happened (who/what/where/when).",
+        "Government action, conflict, disaster, courts, diplomacy, markets, elections, accidents.",
         "",
-        "summary: 1-2 neutral factual sentences. No hot takes.",
+        "keep=false for:",
+        "- ads, affiliate, sponsored, credit cards, product roundups, 'best of' shopping",
+        "- live blogs, live results, match trackers, rolling 'politics live' / 'Europe live' pages",
+        "- sports matches, scores, fixtures; keep sports only if it is a news event (ban, death, corruption)",
+        "- celebrity, entertainment, interviews, awards, culture features",
+        "- human-interest / viral video / true-crime-as-entertainment with no public-event stake",
+        "- explainers, evergreens, 'what it really means', anniversary features with no new fact",
+        "- opinion, op-eds, columns, analysis, editorials, 'containing X', guest essays",
+        "- recipes, lifestyle, listicles, horoscopes, betting, fantasy sports",
+        "",
+        "When unsure, keep=false.",
+        "summary: 1-2 neutral factual sentences. No hot takes. Unused in the list UI.",
         "category: one of world, politics, business, tech, science, health, climate, sports, other.",
         "sentiment: tone of the event (positive/negative/neutral/mixed), not writing style.",
+        "discardReason: short label if keep=false.",
         "",
         `Source: ${input.source}`,
         `Title: ${input.title}`,
         `Snippet: ${input.rawSummary.slice(0, 1200) || "(none)"}`,
       ].join("\n"),
-    });
-    const elapsed = `${Math.round(performance.now() - started)}ms`;
+  });
 
-    if (!output) {
-      console.error("[polish] empty", elapsed, input.source, input.title, {
-        finishReason,
-        inputTokens: usage.inputTokens,
-        outputTokens: usage.outputTokens,
-      });
-      return null;
-    }
+  if (!output) throw new Error(`empty output (${finishReason})`);
 
-    console.log("[polish] ok", elapsed, input.source, input.title, {
-      keep: output.keep,
-      category: output.category,
-      sentiment: output.sentiment,
-      finishReason,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-    });
-
-    return {
-      ...output,
-      summary: output.summary.trim() || input.rawSummary.slice(0, 400) || input.title,
-    };
-  } catch (error) {
-    console.error(
-      "[polish] failed",
-      `${Math.round(performance.now() - started)}ms`,
-      input.source,
-      input.title,
-      inspectAiError(error),
-    );
-    return null;
-  }
+  return {
+    ...output,
+    summary: output.summary.trim() || input.rawSummary.slice(0, 400) || input.title,
+  };
 }
 
-function inspectAiError(error: unknown): Record<string, unknown> {
-  if (!(error instanceof Error)) return { value: String(error) };
-  const inspected: Record<string, unknown> = {
-    name: error.name,
-    message: error.message,
-  };
-  if (error.cause !== undefined) inspected.cause = inspectAiError(error.cause);
-  if (APICallError.isInstance(error)) {
-    inspected.statusCode = error.statusCode;
-    inspected.url = error.url;
-    inspected.responseBody = error.responseBody?.slice(0, 1500);
-    inspected.data = error.data;
+export function formatAiError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+
+  const ref = /internal error;\s*reference\s*=\s*(\S+)/i.exec(error.message)?.[1];
+  if (ref) return `workers-ai internal ref=${ref}`;
+
+  if (error.name === "TimeoutError" || error.name === "AbortError") return "timed out";
+
+  if (APICallError.isInstance(error) && error.statusCode != null) {
+    return `HTTP ${error.statusCode} ${error.message}`;
   }
-  return inspected;
+
+  if (error.cause !== undefined) return `${error.message} (${formatAiError(error.cause)})`;
+  return error.message;
 }

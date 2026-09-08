@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 
 import { createDb } from "./db";
-import { pingPolishModel } from "./ingest/polish";
+import { formatAiError, pingPolishModel } from "./ingest/polish";
 import { runIngest } from "./ingest/run";
 import { newsRoutes } from "./routes/news";
 
@@ -12,14 +12,13 @@ app.route("/api/news", newsRoutes);
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.get("/api/ai-ping", async (c) => {
-  console.log("[ai-ping] start");
   try {
     const result = await pingPolishModel(c.env.AI);
-    console.log("[ai-ping] ok", result);
     return c.json({ ok: true, ...result });
   } catch (error) {
-    console.error("[ai-ping] failed", inspectPingError(error));
-    return c.json({ ok: false, error: inspectPingError(error) }, 500);
+    const message = formatAiError(error);
+    console.error("[ai-ping] failed", message);
+    return c.json({ ok: false, error: message }, 500);
   }
 });
 
@@ -29,15 +28,6 @@ app.post("/api/ingest", async (c) => {
   return c.json(result);
 });
 
-function elapsed(start: number): string {
-  return `${Math.round(performance.now() - start)}ms`;
-}
-
-function inspectPingError(error: unknown): string {
-  if (error instanceof Error) return `${error.name} | ${error.message}`;
-  return String(error);
-}
-
 let ingestRunning = false;
 
 async function runCronIngest(env: CloudflareBindings) {
@@ -46,14 +36,10 @@ async function runCronIngest(env: CloudflareBindings) {
     return { alreadyRunning: true as const };
   }
   ingestRunning = true;
-  const started = performance.now();
-  console.log("[cron] start");
   try {
-    const result = await runIngest(env, createDb(env.DB));
-    console.log("[cron] done", elapsed(started), result);
-    return result;
+    return await runIngest(env, createDb(env.DB));
   } catch (error) {
-    console.error("[cron] failed", elapsed(started), error);
+    console.error("[cron] failed", formatAiError(error));
     throw error;
   } finally {
     ingestRunning = false;

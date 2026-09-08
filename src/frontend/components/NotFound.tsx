@@ -1,3 +1,7 @@
 export function NotFound() {
-  return <p className="py-2 text-muted-foreground">Page not found.</p>;
+  return (
+    <main className="p-6">
+      <p className="text-sm text-neutral-500">Page not found.</p>
+    </main>
+  );
 }

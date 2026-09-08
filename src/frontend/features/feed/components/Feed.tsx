@@ -1,6 +1,10 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { format, parseISO } from "date-fns";
-import { useMemo } from "react";
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useMemo, useRef } from "react";
 
 import type { NewsPage } from "@shared/types";
 
@@ -19,7 +23,36 @@ async function fetchNewsPage({
   return response.json();
 }
 
+function formatTime(iso: string): string {
+  const date = new Date(iso);
+  const now = new Date();
+  const time = date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  if (date.toDateString() === now.toDateString()) return time;
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === yesterday.toDateString()) return "yesterday";
+
+  const day = date.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${day} ${time}`;
+}
+
+function newerThan(latest: NewsPage, headId: string) {
+  const items: NewsPage["items"] = [];
+  for (const item of latest.items) {
+    if (item.id === headId) return { items, capped: false };
+    items.push(item);
+  }
+  return { items, capped: items.length > 0 };
+}
+
 export function Feed() {
+  const queryClient = useQueryClient();
+  const listRef = useRef<HTMLUListElement>(null);
+
   const {
     data,
     fetchNextPage,
@@ -27,7 +60,6 @@ export function Feed() {
     isError,
     isFetching,
     isFetchingNextPage,
-    refetch,
   } = useInfiniteQuery({
     queryKey: ["news"],
     queryFn: fetchNewsPage,
@@ -35,80 +67,132 @@ export function Feed() {
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
 
-  const items = useMemo(
-    () => data?.pages.flatMap((page) => page.items) ?? [],
-    [data],
-  );
+  const items = data?.pages.flatMap((page) => page.items) ?? [];
+  const headId = items[0]?.id ?? null;
 
-  const sentinelRef = useIntersectionObserver(
+  const { data: latest } = useQuery({
+    queryKey: ["news", "latest"],
+    queryFn: () => fetchNewsPage({ pageParam: null }),
+    enabled: Boolean(headId),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const pending = useMemo(() => {
+    if (!latest || !headId) return { items: [], capped: false };
+    return newerThan(latest, headId);
+  }, [latest, headId]);
+
+  const sentinelRef = useIntersectionObserver<HTMLLIElement>(
     () => {
       void fetchNextPage();
     },
     {
       enabled: Boolean(hasNextPage) && !isFetchingNextPage,
-      rootMargin: "400px 0px",
     },
   );
 
+  function reveal() {
+    if (!latest || !headId) return;
+
+    queryClient.setQueryData<InfiniteData<NewsPage, string | null>>(
+      ["news"],
+      (current) => {
+        if (!current || pending.capped) {
+          return { pages: [latest], pageParams: [null] };
+        }
+
+        const [first, ...rest] = current.pages;
+        const existing = new Set(first.items.map((item) => item.id));
+        const incoming = pending.items.filter((item) => !existing.has(item.id));
+
+        return {
+          ...current,
+          pages: [{ ...first, items: [...incoming, ...first.items] }, ...rest],
+        };
+      },
+    );
+
+    listRef.current?.scrollTo({ top: 0 });
+  }
+
+  const pendingLabel = pending.capped
+    ? `${pending.items.length}+ new`
+    : `${pending.items.length} new`;
+
   return (
-    <>
-      <header className="mb-2 flex items-baseline justify-between gap-4 border-b border-border pb-2">
-        <h1>Situation</h1>
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-          disabled={isFetching}
-          onClick={() => {
-            void refetch();
-          }}
-        >
-          Refresh
-        </button>
-      </header>
+    <main className="flex h-svh flex-col overflow-hidden p-6">
+      <p className="text-sm">Situation</p>
+      <div className="relative min-h-0 flex-1">
+        {isError ? (
+          <p className="pt-8 text-sm text-neutral-500">
+            Could not load the feed.
+          </p>
+        ) : null}
 
-      {isError ? (
-        <p className="py-2 text-muted-foreground">Could not load the feed.</p>
-      ) : null}
+        {!isError && items.length === 0 && isFetching ? (
+          <div className="pt-8">
+            <Loading />
+          </div>
+        ) : null}
 
-      {!isError && items.length === 0 && isFetching ? <Loading /> : null}
+        {!isError && items.length === 0 && !isFetching ? (
+          <p className="pt-8 text-sm text-neutral-500">
+            No articles yet. Waiting on the next ingest.
+          </p>
+        ) : null}
 
-      {!isError && items.length === 0 && !isFetching ? (
-        <p className="py-2 text-muted-foreground">
-          No articles yet. Waiting on the next cron ingest.
-        </p>
-      ) : null}
-
-      <ul>
-        {items.map((item) => (
-          <li key={item.id} className="border-b border-border">
-            <a
-              href={item.url}
-              target="_blank"
-              rel="noreferrer"
-              className="-mx-4 flex items-baseline gap-4 px-4 py-1.5 hover:bg-black/[0.03]"
+        {!isError && items.length > 0 ? (
+          <>
+            {pending.items.length > 0 ? (
+              <button
+                className="absolute top-2 z-10 bg-background text-sm text-blue-600"
+                onClick={reveal}
+                type="button"
+              >
+                {pendingLabel}
+              </button>
+            ) : null}
+            <ul
+              className="absolute inset-0 overflow-y-auto pt-8 pb-8"
+              ref={listRef}
             >
-              <span className="font-nums w-[7.25rem] shrink-0 text-muted-foreground">
-                {format(parseISO(item.publishedAt), "MM-dd HH:mm")}
-              </span>
-              <span className="w-16 shrink-0 truncate text-muted-foreground">
-                {item.category}
-              </span>
-              <span className="min-w-0 flex-1 truncate">{item.title}</span>
-              <span className="max-w-36 shrink-0 truncate text-right text-muted-foreground">
-                {item.sourceName}
-              </span>
-            </a>
-          </li>
-        ))}
-      </ul>
-
-      <div
-        ref={sentinelRef}
-        className="mt-4 pb-10 text-center text-muted-foreground"
-      >
-        {isFetchingNextPage ? <Loading /> : null}
-        {!hasNextPage && items.length > 0 ? "End of feed" : null}
+              {items.map((item) => (
+                <li className="py-2 text-sm" key={item.id}>
+                  <a
+                    className="group hover:text-blue-600"
+                    href={item.url}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <time
+                      className="text-neutral-500 tabular-nums group-hover:text-blue-600"
+                      dateTime={item.publishedAt}
+                    >
+                      {formatTime(item.publishedAt)}
+                    </time>{" "}
+                    {item.title}
+                    {" - "}
+                    <span className="text-neutral-500 group-hover:text-blue-600">
+                      {item.sourceName}
+                    </span>
+                  </a>
+                </li>
+              ))}
+              {hasNextPage ? <li ref={sentinelRef} className="h-8" /> : null}
+              {isFetchingNextPage ? (
+                <li>
+                  <Loading />
+                </li>
+              ) : null}
+            </ul>
+          </>
+        ) : null}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-white/70 to-transparent" />
       </div>
-    </>
+      <p className="relative z-10 max-w-md pt-4 text-sm text-neutral-500">
+        What's happening. That's it.
+      </p>
+    </main>
   );
 }

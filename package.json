@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "bun@1.4.2",
   "scripts": {
-    "dev": "bun run --parallel vite scheduler",
+    "dev": "vite",
     "vite": "vite",
     "scheduler": "bun -e \"console.log('[scheduler] started'); while (true) { console.log('[scheduler] tick'); try { const r = await fetch('http://localhost:5173/api/ingest', { method: 'POST', signal: AbortSignal.timeout(180_000) }); console.log('[scheduler]', r.status, await r.text()) } catch (e) { console.log('[scheduler]', e instanceof Error ? e.message : e) } await Bun.sleep(60_000) }\"",
     "build": "vite build",

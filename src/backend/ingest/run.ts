@@ -4,7 +4,7 @@ import type { Db } from "../db";
 import { articles } from "../db/schema";
 import { FEEDS } from "./feeds";
 import { hashUrl, parseFeedXml, type ParsedItem } from "./parse";
-import { polishArticle } from "./polish";
+import { formatAiError, polishArticle, type PolishResult } from "./polish";
 
 const MAX_NEW_PER_RUN = 20;
 const FETCH_HEADERS = {
@@ -43,7 +43,6 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
     publishedAt: Date;
   }> = [];
 
-  const feedsStarted = performance.now();
   const feeds = await Promise.all(
     FEEDS.map(async (feed) => {
       const started = performance.now();
@@ -53,13 +52,12 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
           signal: AbortSignal.timeout(12_000),
         });
         if (!response.ok) {
-          console.error("[ingest] feed", feed.id, elapsed(started), `HTTP ${response.status}`);
-          return { feed, error: `HTTP ${response.status}`, items: [] as ParsedItem[] };
+          const message = `HTTP ${response.status}`;
+          console.error("[ingest] feed", feed.id, elapsed(started), message);
+          return { feed, error: message, items: [] as ParsedItem[] };
         }
         const xml = await response.text();
-        const items = parseFeedXml(xml);
-        console.log("[ingest] feed", feed.id, elapsed(started), `${items.length} items`);
-        return { feed, error: null, items };
+        return { feed, error: null, items: parseFeedXml(xml) };
       } catch (error) {
         const message = error instanceof Error ? error.message : "fetch failed";
         console.error("[ingest] feed", feed.id, elapsed(started), message);
@@ -67,9 +65,7 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
       }
     }),
   );
-  console.log("[ingest] feeds wall", elapsed(feedsStarted), `${FEEDS.length} feeds`);
 
-  const hashStarted = performance.now();
   for (const entry of feeds) {
     if (entry.error) {
       result.errors.push(`${entry.feed.id}: ${entry.error}`);
@@ -87,14 +83,12 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
       });
     }
   }
-  console.log("[ingest] candidates", candidates.length, elapsed(hashStarted));
 
   if (candidates.length === 0) {
     console.log("[ingest] done", elapsed(ingestStarted), result);
     return result;
   }
 
-  const dedupeStarted = performance.now();
   const hashes = [...new Set(candidates.map((c) => c.urlHash))];
   const existing = new Set<string>();
   for (let i = 0; i < hashes.length; i += 80) {
@@ -113,31 +107,22 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
     .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
     .slice(0, MAX_NEW_PER_RUN);
 
-  console.log("[ingest] dedupe", elapsed(dedupeStarted), {
-    unique: hashes.length,
-    existing: existing.size,
-    fresh: fresh.length,
-    process: toProcess.length,
-    skipped: result.skipped,
-  });
-
   const now = new Date();
-  const polishLoopStarted = performance.now();
 
-  for (const [index, item] of toProcess.entries()) {
-    console.log("[ingest] item", `${index + 1}/${toProcess.length}`, item.source, item.title);
-    const itemStarted = performance.now();
-    const polished = await polishArticle(env.AI, {
-      title: item.title,
-      rawSummary: item.rawSummary,
-      source: item.source,
-    });
-
-    if (!polished) {
-      result.unpolished += 1;
-      result.errors.push(`polish: ${item.source} ${item.title}`);
-    } else {
+  for (const item of toProcess) {
+    let polished: PolishResult | null = null;
+    try {
+      polished = await polishArticle(env.AI, {
+        title: item.title,
+        rawSummary: item.rawSummary,
+        source: item.source,
+      });
       result.polished += 1;
+    } catch (error) {
+      const message = formatAiError(error);
+      result.unpolished += 1;
+      result.errors.push(`${item.source} ${item.title}: ${message}`);
+      console.error("[ingest] polish", item.source, item.title, message);
     }
 
     const keep = polished?.keep ?? true;
@@ -150,7 +135,6 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
 
     if (!keep) result.hidden += 1;
 
-    const insertStarted = performance.now();
     await db
       .insert(articles)
       .values({
@@ -168,22 +152,10 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
         ingestedAt: now,
       })
       .onConflictDoNothing();
-    const insertMs = Math.round(performance.now() - insertStarted);
 
     result.inserted += 1;
-    console.log("[ingest] item done", `${index + 1}/${toProcess.length}`, elapsed(itemStarted), {
-      insertMs,
-      category,
-      sentiment,
-      keep,
-      polished: Boolean(polished),
-    });
   }
 
-  console.log("[ingest] polish loop", elapsed(polishLoopStarted), {
-    polished: result.polished,
-    unpolished: result.unpolished,
-  });
   console.log("[ingest] done", elapsed(ingestStarted), result);
   return result;
 }

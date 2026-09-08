@@ -1,3 +1,3 @@
 export function Loading() {
-  return <p className="py-2 text-center text-muted-foreground">Loading…</p>;
+  return <p className="text-sm text-neutral-500">Loading…</p>;
 }
