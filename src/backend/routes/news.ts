@@ -1,39 +1,21 @@
-import { and, desc, eq, lt, or, SQL } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import { Hono } from "hono";
 
 import { createDb } from "../db";
 import { articles } from "../db/schema";
 import { sourceName } from "../ingest/feeds";
-import type { ArticleDto, Category, NewsPage, Sentiment } from "../../shared/types";
+import type { NewsPage } from "../../shared/types";
 import { CATEGORIES } from "../../shared/types";
 
-function encodeCursor(publishedAt: Date, id: string): string {
+function encodeCursor(publishedAt: Date, id: string) {
   return `${publishedAt.getTime()}_${id}`;
 }
 
-function decodeCursor(cursor: string | undefined): { publishedAt: Date; id: string } | null {
-  if (!cursor) return null;
-  const [ms, ...rest] = cursor.split("_");
-  const id = rest.join("_");
+function decodeCursor(cursor: string | undefined) {
+  const [ms, id] = cursor?.split("_", 2) ?? [];
   const time = Number(ms);
   if (!id || !Number.isFinite(time)) return null;
   return { publishedAt: new Date(time), id };
-}
-
-function toDto(row: typeof articles.$inferSelect): ArticleDto {
-  return {
-    id: row.id,
-    source: row.source,
-    sourceName: sourceName(row.source),
-    title: row.title,
-    url: row.url,
-    summary: row.summary || row.rawSummary || row.title,
-    category: (CATEGORIES.includes(row.category as Category)
-      ? row.category
-      : "other") as Category,
-    sentiment: row.sentiment as Sentiment,
-    publishedAt: row.publishedAt.toISOString(),
-  };
 }
 
 export const newsRoutes = new Hono<{ Bindings: CloudflareBindings }>();
@@ -43,11 +25,11 @@ newsRoutes.get("/", async (c) => {
   const limitRaw = Number(c.req.query("limit") ?? "30");
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 30;
   const cursor = decodeCursor(c.req.query("cursor") ?? undefined);
-  const category = c.req.query("category");
 
-  const filters: SQL[] = [eq(articles.keep, true)];
-  if (category && CATEGORIES.includes(category as Category)) {
-    filters.push(eq(articles.category, category));
+  const filters = [eq(articles.keep, true)];
+  const matchedCategory = CATEGORIES.find((entry) => entry === c.req.query("category"));
+  if (matchedCategory) {
+    filters.push(eq(articles.category, matchedCategory));
   }
   if (cursor) {
     filters.push(
@@ -68,7 +50,18 @@ newsRoutes.get("/", async (c) => {
   const pageRows = rows.slice(0, limit);
   const last = pageRows[pageRows.length - 1];
   const payload: NewsPage = {
-    items: pageRows.map(toDto),
+    items: pageRows.map((row) => ({
+      id: row.id,
+      source: row.source,
+      sourceName: sourceName(row.source),
+      title: row.title,
+      url: row.url,
+      summary: row.summary || row.rawSummary || row.title,
+      category: row.category,
+      sentiment: row.sentiment,
+      tickers: row.tickers ?? [],
+      publishedAt: row.publishedAt.toISOString(),
+    })),
     nextCursor:
       rows.length > limit && last ? encodeCursor(last.publishedAt, last.id) : null,
   };
@@ -86,5 +79,16 @@ newsRoutes.get("/:id", async (c) => {
     .limit(1);
 
   if (!row) return c.json({ error: "not_found" }, 404);
-  return c.json(toDto(row));
+  return c.json({
+    id: row.id,
+    source: row.source,
+    sourceName: sourceName(row.source),
+    title: row.title,
+    url: row.url,
+    summary: row.summary || row.rawSummary || row.title,
+    category: row.category,
+    sentiment: row.sentiment,
+    tickers: row.tickers ?? [],
+    publishedAt: row.publishedAt.toISOString(),
+  });
 });

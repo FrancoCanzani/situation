@@ -2,8 +2,10 @@ import { inArray } from "drizzle-orm";
 
 import type { Db } from "../db";
 import { articles } from "../db/schema";
+import { resolveMentions } from "../market/resolve";
+import type { ArticleTicker } from "../../shared/types";
 import { FEEDS } from "./feeds";
-import { hashUrl, parseFeedXml, type ParsedItem } from "./parse";
+import { parseFeedXml, type ParsedItem } from "./parse";
 import { formatAiError, polishArticle, type PolishResult } from "./polish";
 
 const MAX_NEW_PER_RUN = 20;
@@ -23,7 +25,6 @@ export type IngestResult = {
 };
 
 export async function runIngest(env: CloudflareBindings, db: Db): Promise<IngestResult> {
-  const ingestStarted = performance.now();
   const result: IngestResult = {
     fetched: 0,
     inserted: 0,
@@ -38,29 +39,27 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
     source: string;
     title: string;
     url: string;
-    urlHash: string;
     rawSummary: string;
     publishedAt: Date;
   }> = [];
 
   const feeds = await Promise.all(
     FEEDS.map(async (feed) => {
-      const started = performance.now();
       try {
         const response = await fetch(feed.url, {
           headers: FETCH_HEADERS,
-          signal: AbortSignal.timeout(12_000),
+          signal: AbortSignal.timeout(10_000),
         });
         if (!response.ok) {
           const message = `HTTP ${response.status}`;
-          console.error("[ingest] feed", feed.id, elapsed(started), message);
+          console.error("[ingest] feed", feed.id, message);
           return { feed, error: message, items: [] as ParsedItem[] };
         }
         const xml = await response.text();
         return { feed, error: null, items: parseFeedXml(xml) };
       } catch (error) {
         const message = error instanceof Error ? error.message : "fetch failed";
-        console.error("[ingest] feed", feed.id, elapsed(started), message);
+        console.error("[ingest] feed", feed.id, message);
         return { feed, error: message, items: [] as ParsedItem[] };
       }
     }),
@@ -77,30 +76,26 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
         source: entry.feed.id,
         title: item.title,
         url: item.url,
-        urlHash: await hashUrl(item.url),
         rawSummary: item.rawSummary,
         publishedAt: item.publishedAt,
       });
     }
   }
 
-  if (candidates.length === 0) {
-    console.log("[ingest] done", elapsed(ingestStarted), result);
-    return result;
-  }
+  if (candidates.length === 0) return result;
 
-  const hashes = [...new Set(candidates.map((c) => c.urlHash))];
+  const urls = [...new Set(candidates.map((c) => c.url))];
   const existing = new Set<string>();
-  for (let i = 0; i < hashes.length; i += 80) {
-    const chunk = hashes.slice(i, i + 80);
+  for (let i = 0; i < urls.length; i += 80) {
+    const chunk = urls.slice(i, i + 80);
     const rows = await db
-      .select({ urlHash: articles.urlHash })
+      .select({ url: articles.url })
       .from(articles)
-      .where(inArray(articles.urlHash, chunk));
-    for (const row of rows) existing.add(row.urlHash);
+      .where(inArray(articles.url, chunk));
+    for (const row of rows) existing.add(row.url);
   }
 
-  const fresh = candidates.filter((c) => !existing.has(c.urlHash));
+  const fresh = candidates.filter((c) => !existing.has(c.url));
   result.skipped = candidates.length - fresh.length;
 
   const toProcess = fresh
@@ -133,6 +128,16 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
     const category = polished?.category ?? "other";
     const sentiment = polished?.sentiment ?? "neutral";
 
+    let tickers: ArticleTicker[] = [];
+    if (keep && polished?.mentions?.length) {
+      try {
+        tickers = await resolveMentions(item.title, polished.mentions);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "resolve failed";
+        result.errors.push(`${item.source} ${item.title}: tickers ${message}`);
+      }
+    }
+
     if (!keep) result.hidden += 1;
 
     await db
@@ -140,13 +145,13 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
       .values({
         id: crypto.randomUUID(),
         url: item.url,
-        urlHash: item.urlHash,
         source: item.source,
         title: item.title,
         rawSummary: item.rawSummary,
         summary,
         category,
         sentiment,
+        tickers,
         keep,
         publishedAt: item.publishedAt,
         ingestedAt: now,
@@ -156,10 +161,5 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
     result.inserted += 1;
   }
 
-  console.log("[ingest] done", elapsed(ingestStarted), result);
   return result;
-}
-
-function elapsed(start: number): string {
-  return `${Math.round(performance.now() - start)}ms`;
 }

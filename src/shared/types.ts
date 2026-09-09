@@ -21,6 +21,11 @@ export const SENTIMENTS = [
 
 export type Sentiment = (typeof SENTIMENTS)[number];
 
+export type ArticleTicker = {
+  symbol: string;
+  name: string;
+};
+
 export type ArticleDto = {
   id: string;
   source: string;
@@ -30,10 +35,31 @@ export type ArticleDto = {
   summary: string;
   category: Category;
   sentiment: Sentiment;
+  tickers: ArticleTicker[];
   publishedAt: string;
 };
 
 export type NewsPage = {
   items: ArticleDto[];
   nextCursor: string | null;
+};
+
+export type MarketBannerItem = {
+  id: string;
+  label: string;
+  changePercent: number | null;
+};
+
+export type MarketBanner = {
+  items: MarketBannerItem[];
+  asOf: string;
+};
+
+export type MarketQuote = {
+  symbol: string;
+  name: string;
+  price: number | null;
+  changePercent: number | null;
+  points: number[];
+  asOf: string;
 };

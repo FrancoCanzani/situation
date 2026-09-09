@@ -10,10 +10,19 @@ const polishSchema = z.object({
   sentiment: z.enum(SENTIMENTS),
   summary: z.string(),
   discardReason: z.string().optional(),
+  mentions: z
+    .array(
+      z.object({
+        name: z.string(),
+        ticker: z.string().optional(),
+      }),
+    )
+    .max(3)
+    .optional(),
 });
 
 const POLISH_MODEL = "@cf/zai-org/glm-4.7-flash";
-const POLISH_MAX_TOKENS = 200;
+const POLISH_MAX_TOKENS = 320;
 const POLISH_TIMEOUT_MS = 8_000;
 
 export type PolishResult = z.infer<typeof polishSchema>;
@@ -23,17 +32,6 @@ export function polishModel(ai: Ai) {
     reasoning_effort: null,
     chat_template_kwargs: { enable_thinking: false },
   });
-}
-
-export async function pingPolishModel(ai: Ai): Promise<{ text: string; ms: number }> {
-  const started = performance.now();
-  const { text } = await generateText({
-    model: polishModel(ai),
-    prompt: "Reply with the single word pong.",
-    maxRetries: 0,
-    maxOutputTokens: 8,
-  });
-  return { text: text.trim(), ms: Math.round(performance.now() - started) };
 }
 
 export async function polishArticle(
@@ -50,33 +48,35 @@ export async function polishArticle(
       description: "Gate a headline for a world news wire: keep or discard.",
       schema: polishSchema,
     }),
-      prompt: [
-        "You gate news for Situation, a world-important news wire.",
-        "Return structured JSON only. Do not rewrite the headline.",
-        "",
-        "keep=true only for a reported news event: something happened (who/what/where/when).",
-        "Government action, conflict, disaster, courts, diplomacy, markets, elections, accidents.",
-        "",
-        "keep=false for:",
-        "- ads, affiliate, sponsored, credit cards, product roundups, 'best of' shopping",
-        "- live blogs, live results, match trackers, rolling 'politics live' / 'Europe live' pages",
-        "- sports matches, scores, fixtures; keep sports only if it is a news event (ban, death, corruption)",
-        "- celebrity, entertainment, interviews, awards, culture features",
-        "- human-interest / viral video / true-crime-as-entertainment with no public-event stake",
-        "- explainers, evergreens, 'what it really means', anniversary features with no new fact",
-        "- opinion, op-eds, columns, analysis, editorials, 'containing X', guest essays",
-        "- recipes, lifestyle, listicles, horoscopes, betting, fantasy sports",
-        "",
-        "When unsure, keep=false.",
-        "summary: 1-2 neutral factual sentences. No hot takes. Unused in the list UI.",
-        "category: one of world, politics, business, tech, science, health, climate, sports, other.",
-        "sentiment: tone of the event (positive/negative/neutral/mixed), not writing style.",
-        "discardReason: short label if keep=false.",
-        "",
-        `Source: ${input.source}`,
-        `Title: ${input.title}`,
-        `Snippet: ${input.rawSummary.slice(0, 1200) || "(none)"}`,
-      ].join("\n"),
+    prompt: [
+      "You gate news for Situation, a world-important news wire.",
+      "Return structured JSON only. Do not rewrite the headline.",
+      "",
+      "keep=true only for a reported news event: something happened (who/what/where/when).",
+      "Government action, conflict, disaster, courts, diplomacy, markets, elections, accidents.",
+      "",
+      "keep=false for:",
+      "- ads, affiliate, sponsored, credit cards, product roundups, 'best of' shopping",
+      "- live blogs, live results, match trackers, rolling 'politics live' / 'Europe live' pages",
+      "- sports matches, scores, fixtures; keep sports only if it is a news event (ban, death, corruption)",
+      "- celebrity, entertainment, interviews, awards, culture features",
+      "- human-interest / viral video / true-crime-as-entertainment with no public-event stake",
+      "- explainers, evergreens, 'what it really means', anniversary features with no new fact",
+      "- opinion, op-eds, columns, analysis, editorials, 'containing X', guest essays",
+      "- recipes, lifestyle, listicles, horoscopes, betting, fantasy sports",
+      "",
+      "When unsure, keep=false.",
+      "summary: 1-2 neutral factual sentences. No hot takes. Unused in the list UI.",
+      "category: one of world, politics, business, tech, science, health, climate, sports, other.",
+      "sentiment: tone of the event (positive/negative/neutral/mixed), not writing style.",
+      "discardReason: short label if keep=false.",
+      "mentions: up to 3 publicly traded companies named in the Title (exact spelling as in Title).",
+      "Include ticker only if you are sure (e.g. AAPL). Empty array if none.",
+      "",
+      `Source: ${input.source}`,
+      `Title: ${input.title}`,
+      `Snippet: ${input.rawSummary.slice(0, 1200) || "(none)"}`,
+    ].join("\n"),
   });
 
   if (!output) throw new Error(`empty output (${finishReason})`);
@@ -84,6 +84,7 @@ export async function polishArticle(
   return {
     ...output,
     summary: output.summary.trim() || input.rawSummary.slice(0, 400) || input.title,
+    mentions: output.mentions ?? [],
   };
 }
 

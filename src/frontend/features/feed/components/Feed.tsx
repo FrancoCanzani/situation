@@ -11,6 +11,9 @@ import type { NewsPage } from "@shared/types";
 import { Loading } from "@/components/Loading";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 
+import { MarketBanner } from "./MarketBanner";
+import { TitleWithTickers } from "./TitleWithTickers";
+
 async function fetchNewsPage({
   pageParam,
 }: {
@@ -122,7 +125,10 @@ export function Feed() {
 
   return (
     <main className="flex h-svh flex-col overflow-hidden p-6">
-      <p className="text-sm">Situation</p>
+      <div>
+        <p className="text-sm">Situation</p>
+        <MarketBanner />
+      </div>
       <div className="relative min-h-0 flex-1">
         {isError ? (
           <p className="pt-8 text-sm text-neutral-500">
@@ -159,23 +165,25 @@ export function Feed() {
             >
               {items.map((item) => (
                 <li className="py-2 text-sm" key={item.id}>
+                  <time
+                    className="text-neutral-500 tabular-nums"
+                    dateTime={item.publishedAt}
+                  >
+                    {formatTime(item.publishedAt)}
+                  </time>{" "}
+                  <TitleWithTickers
+                    tickers={item.tickers ?? []}
+                    title={item.title}
+                    url={item.url}
+                  />
+                  {" - "}
                   <a
-                    className="group hover:text-blue-600"
+                    className="text-neutral-500 hover:text-blue-600"
                     href={item.url}
                     rel="noreferrer"
                     target="_blank"
                   >
-                    <time
-                      className="text-neutral-500 tabular-nums group-hover:text-blue-600"
-                      dateTime={item.publishedAt}
-                    >
-                      {formatTime(item.publishedAt)}
-                    </time>{" "}
-                    {item.title}
-                    {" - "}
-                    <span className="text-neutral-500 group-hover:text-blue-600">
-                      {item.sourceName}
-                    </span>
+                    {item.sourceName}
                   </a>
                 </li>
               ))}
