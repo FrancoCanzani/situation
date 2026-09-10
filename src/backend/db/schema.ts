@@ -11,6 +11,7 @@ export const articles = sqliteTable("articles", {
   summary: text("summary").notNull().default(""),
   category: text("category").$type<Category>().notNull().default("other"),
   sentiment: text("sentiment").$type<Sentiment>().notNull().default("neutral"),
+  importance: integer("importance"),
   tickers: text("tickers", { mode: "json" })
     .$type<ArticleTicker[]>()
     .notNull()

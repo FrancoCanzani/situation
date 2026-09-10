@@ -3,9 +3,16 @@ import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 
 import { CATEGORIES, SENTIMENTS } from "../../shared/types";
+import type { Mention } from "../market/resolve";
+
+const KEEP_IMPORTANCE = 7;
 
 const polishSchema = z.object({
-  keep: z.boolean(),
+  importance: z
+    .number()
+    .min(0)
+    .max(10)
+    .transform((n) => Math.round(Math.min(10, Math.max(0, n)))),
   category: z.enum(CATEGORIES),
   sentiment: z.enum(SENTIMENTS),
   summary: z.string(),
@@ -22,10 +29,22 @@ const polishSchema = z.object({
 });
 
 const POLISH_MODEL = "@cf/zai-org/glm-4.7-flash";
-const POLISH_MAX_TOKENS = 320;
+const POLISH_MAX_TOKENS = 400;
 const POLISH_TIMEOUT_MS = 8_000;
 
-export type PolishResult = z.infer<typeof polishSchema>;
+export type PolishResult = {
+  importance: number;
+  category: (typeof CATEGORIES)[number];
+  sentiment: (typeof SENTIMENTS)[number];
+  summary: string;
+  mentions: Mention[];
+  discardReason?: string;
+};
+
+export function keepFromPolish(polished: PolishResult | null): boolean {
+  if (!polished) return false;
+  return polished.importance >= KEEP_IMPORTANCE;
+}
 
 export function polishModel(ai: Ai) {
   return createWorkersAI({ binding: ai })(POLISH_MODEL, {
@@ -45,31 +64,34 @@ export async function polishArticle(
     abortSignal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
     output: Output.object({
       name: "ArticlePolish",
-      description: "Gate a headline for a world news wire: keep or discard.",
+      description: "Score a headline for a world news wire and extract listed companies.",
       schema: polishSchema,
     }),
     prompt: [
       "You gate news for Situation, a world-important news wire.",
       "Return structured JSON only. Do not rewrite the headline.",
       "",
-      "keep=true only for a reported news event: something happened (who/what/where/when).",
-      "Government action, conflict, disaster, courts, diplomacy, markets, elections, accidents.",
+      "importance: integer 0–10 for how world-important this reported event is.",
+      "10 = major geopolitics, war, disaster, market-moving, elections, courts with public stake.",
+      "7–9 = clear news event worth the wire.",
+      "4–6 = narrow or soft news.",
+      "0–3 = opinion, lifestyle, listicle, sports score, celebrity, evergreen, ad, live blog.",
+      "Feed only shows importance ≥ 7. When unsure, score below 7.",
       "",
-      "keep=false for:",
+      "Score low (0–3) for:",
       "- ads, affiliate, sponsored, credit cards, product roundups, 'best of' shopping",
       "- live blogs, live results, match trackers, rolling 'politics live' / 'Europe live' pages",
-      "- sports matches, scores, fixtures; keep sports only if it is a news event (ban, death, corruption)",
+      "- sports matches, scores, fixtures; sports news events (ban, death, corruption) can score higher",
       "- celebrity, entertainment, interviews, awards, culture features",
       "- human-interest / viral video / true-crime-as-entertainment with no public-event stake",
       "- explainers, evergreens, 'what it really means', anniversary features with no new fact",
       "- opinion, op-eds, columns, analysis, editorials, 'containing X', guest essays",
       "- recipes, lifestyle, listicles, horoscopes, betting, fantasy sports",
       "",
-      "When unsure, keep=false.",
       "summary: 1-2 neutral factual sentences. No hot takes. Unused in the list UI.",
       "category: one of world, politics, business, tech, science, health, climate, sports, other.",
       "sentiment: tone of the event (positive/negative/neutral/mixed), not writing style.",
-      "discardReason: short label if keep=false.",
+      "discardReason: short label if importance < 7.",
       "mentions: up to 3 publicly traded companies named in the Title (exact spelling as in Title).",
       "Include ticker only if you are sure (e.g. AAPL). Empty array if none.",
       "",
@@ -82,9 +104,12 @@ export async function polishArticle(
   if (!output) throw new Error(`empty output (${finishReason})`);
 
   return {
-    ...output,
+    importance: output.importance,
+    category: output.category,
+    sentiment: output.sentiment,
     summary: output.summary.trim() || input.rawSummary.slice(0, 400) || input.title,
     mentions: output.mentions ?? [],
+    discardReason: output.discardReason,
   };
 }
 

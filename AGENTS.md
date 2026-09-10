@@ -6,6 +6,18 @@ Never add JSDoc. Never narrate what the next lines do. Names and types are the d
 
 Only short `//` comments that explain a non-obvious **why** (platform limit, security, workaround). Prefer renaming over documenting.
 
+## Files
+
+- All `.ts` / `.tsx` filenames are **kebab-case**. Exports stay PascalCase / camelCase (`feed-page.tsx` → `FeedPage`, `use-intersection-observer.ts` → `useIntersectionObserver`).
+- No PascalCase or camelCase filenames. `components/ui/` (shadcn) stays kebab.
+- Features: `src/frontend/features/<domain>/components/` for UI; helpers in `features/<domain>/lib/`; feature hooks as `lib/use-*.ts`.
+- Shared only when cross-feature: `components/` (+ `ui/`), `hooks/`, `lib/`.
+- Routes stay thin: `routes/` wires `component: …`; page UI lives in features as `*-page.tsx`.
+- Backend modules stay kebab / lowercase. When a resource grows: `routes/<resource>/{index,get,post}.ts` + `lib/` — don't force-split tiny files.
+- Shared wire types live in `src/shared/`.
+- No barrels (`index.ts` re-exports) unless needed for a package boundary.
+- Leave generated / entry specials as-is when required by tooling: `main.tsx`, `routes/__root.tsx`, `routeTree.gen.ts`, `index.css`. Prefer `app.tsx` over `App.tsx`.
+
 ## Git
 
 - Never `git commit` unless the user asks in that turn.

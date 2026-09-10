@@ -8,6 +8,16 @@
     />
     <meta name="theme-color" content="#ffffff" />
     <title>Situation</title>
+    <script>
+      try {
+        if (localStorage.getItem("theme") === "dark") {
+          document.documentElement.classList.add("dark");
+          document
+            .querySelector('meta[name="theme-color"]')
+            ?.setAttribute("content", "#111111");
+        }
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

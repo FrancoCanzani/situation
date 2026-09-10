@@ -1,7 +1,7 @@
 import { Outlet, createRootRoute } from "@tanstack/react-router";
 
-import { Loading } from "@/components/Loading";
-import { NotFound } from "@/components/NotFound";
+import { Loading } from "@/components/loading";
+import { NotFound } from "@/components/not-found";
 
 export const Route = createRootRoute({
   component: RootLayout,

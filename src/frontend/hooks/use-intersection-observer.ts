@@ -1,12 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
-type Options = IntersectionObserverInit & {
+type Options = Omit<IntersectionObserverInit, "root"> & {
   enabled?: boolean;
+  rootRef?: RefObject<Element | null>;
 };
 
 export function useIntersectionObserver<T extends Element = HTMLDivElement>(
   onIntersect: () => void,
-  { enabled = true, root, rootMargin, threshold }: Options = {},
+  { enabled = true, rootRef, rootMargin, threshold }: Options = {},
 ) {
   const ref = useRef<T | null>(null);
   const onIntersectRef = useRef(onIntersect);
@@ -20,12 +21,12 @@ export function useIntersectionObserver<T extends Element = HTMLDivElement>(
       ([entry]) => {
         if (entry?.isIntersecting) onIntersectRef.current();
       },
-      { root, rootMargin, threshold },
+      { root: rootRef?.current ?? null, rootMargin, threshold },
     );
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [enabled, root, rootMargin, threshold]);
+  }, [enabled, rootRef, rootMargin, threshold]);
 
   return ref;
 }

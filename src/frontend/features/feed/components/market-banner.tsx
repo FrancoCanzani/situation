@@ -26,11 +26,24 @@ export function MarketBanner() {
   if (!data?.items.length) return null;
 
   return (
-    <p className="pt-2 text-sm text-neutral-500 tabular-nums">
+    <p className="text-sm text-muted-foreground tabular-nums">
       {data.items.map((item, index) => (
         <span key={item.id}>
           {index > 0 ? " · " : null}
-          {item.label} {formatChange(item.changePercent)}
+          {item.label}{" "}
+          <span
+            className={
+              item.changePercent == null || !Number.isFinite(item.changePercent)
+                ? undefined
+                : item.changePercent > 0
+                  ? "text-green-600"
+                  : item.changePercent < 0
+                    ? "text-red-600"
+                    : undefined
+            }
+          >
+            {formatChange(item.changePercent)}
+          </span>
         </span>
       ))}
     </p>

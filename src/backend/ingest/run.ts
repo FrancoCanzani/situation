@@ -1,12 +1,17 @@
 import { inArray } from "drizzle-orm";
 
+import type { ArticleTicker } from "../../shared/types";
 import type { Db } from "../db";
 import { articles } from "../db/schema";
 import { resolveMentions } from "../market/resolve";
-import type { ArticleTicker } from "../../shared/types";
 import { FEEDS } from "./feeds";
 import { parseFeedXml, type ParsedItem } from "./parse";
-import { formatAiError, polishArticle, type PolishResult } from "./polish";
+import {
+  formatAiError,
+  keepFromPolish,
+  polishArticle,
+  type PolishResult,
+} from "./polish";
 
 const MAX_NEW_PER_RUN = 20;
 const FETCH_HEADERS = {
@@ -103,30 +108,35 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
     .slice(0, MAX_NEW_PER_RUN);
 
   const now = new Date();
+  const ai = env.AI;
 
   for (const item of toProcess) {
     let polished: PolishResult | null = null;
-    try {
-      polished = await polishArticle(env.AI, {
-        title: item.title,
-        rawSummary: item.rawSummary,
-        source: item.source,
-      });
-      result.polished += 1;
-    } catch (error) {
-      const message = formatAiError(error);
+
+    if (!ai) {
       result.unpolished += 1;
-      result.errors.push(`${item.source} ${item.title}: ${message}`);
-      console.error("[ingest] polish", item.source, item.title, message);
+    } else {
+      try {
+        polished = await polishArticle(ai, {
+          title: item.title,
+          rawSummary: item.rawSummary,
+          source: item.source,
+        });
+        result.polished += 1;
+      } catch (error) {
+        const message = formatAiError(error);
+        result.unpolished += 1;
+        result.errors.push(`${item.source} ${item.title}: ${message}`);
+        console.error("[ingest] polish", item.source, item.title, message);
+      }
     }
 
-    const keep = polished?.keep ?? true;
+    const keep = keepFromPolish(polished);
     const summary =
-      polished?.summary ??
-      item.rawSummary.slice(0, 400) ??
-      item.title;
+      polished?.summary ?? item.rawSummary.slice(0, 400) ?? item.title;
     const category = polished?.category ?? "other";
     const sentiment = polished?.sentiment ?? "neutral";
+    const importance = polished?.importance ?? null;
 
     let tickers: ArticleTicker[] = [];
     if (keep && polished?.mentions?.length) {
@@ -151,6 +161,7 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
         summary,
         category,
         sentiment,
+        importance,
         tickers,
         keep,
         publishedAt: item.publishedAt,

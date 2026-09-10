@@ -1,6 +1,6 @@
 import type { ArticleTicker } from "@shared/types";
 
-import { TickerChip } from "./TickerChip";
+import { TickerChip } from "./ticker-chip";
 
 type Segment =
   | { type: "text"; value: string }
