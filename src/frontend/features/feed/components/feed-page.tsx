@@ -6,13 +6,14 @@ import {
 } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import type { NewsPage } from "@shared/types";
+import type { NewsItem, NewsPage } from "@shared/types";
 
 import { Loading } from "@/components/loading";
 import { useIntersectionObserver } from "@/hooks/use-intersection-observer";
 import { cn } from "@/lib/utils";
 
 import { MarketBanner } from "./market-banner";
+import { SourceCitation } from "./source-citation";
 import { TitleWithTickers } from "./title-with-tickers";
 
 async function fetchNewsPage({
@@ -77,6 +78,34 @@ function useElementHeight<T extends HTMLElement>() {
   return [ref, height] as const;
 }
 
+function NewsRow({
+  item,
+  entering,
+}: {
+  item: NewsItem;
+  entering: boolean;
+}) {
+  return (
+    <li
+      className={cn(
+        "py-2 text-sm",
+        entering && "animate-in fade-in duration-300",
+      )}
+    >
+      <time
+        className="whitespace-nowrap text-muted-foreground tabular-nums"
+        dateTime={item.lastSeenAt}
+      >
+        {formatTime(item.lastSeenAt)}
+      </time>
+      {" - "}
+      <TitleWithTickers tickers={item.tickers} title={item.title} />
+      {" - "}
+      <SourceCitation eventId={item.id} sourceNames={item.sourceNames} />
+    </li>
+  );
+}
+
 export function FeedPage() {
   const queryClient = useQueryClient();
   const [headerRef, headerHeight] = useElementHeight<HTMLElement>();
@@ -116,7 +145,10 @@ export function FeedPage() {
   const pending =
     latest && headId ? newerThan(latest, headId) : { items: [], capped: false };
 
-  function applyLatest(page: NewsPage, incoming: ReturnType<typeof newerThan>) {
+  function applyLatest(
+    page: NewsPage,
+    incoming: ReturnType<typeof newerThan>,
+  ) {
     if (!incoming.capped && incoming.items.length > 0) {
       setEnteringIds(new Set(incoming.items.map((item) => item.id)));
       window.clearTimeout(enterTimeoutRef.current);
@@ -126,10 +158,13 @@ export function FeedPage() {
       );
     }
 
-    queryClient.setQueryData<InfiniteData<NewsPage, string | null>>(["news"], {
-      pages: [page],
-      pageParams: [null],
-    });
+    queryClient.setQueryData<InfiniteData<NewsPage, string | null>>(
+      ["news"],
+      {
+        pages: [page],
+        pageParams: [null],
+      },
+    );
   }
 
   useEffect(() => {
@@ -191,25 +226,32 @@ export function FeedPage() {
       </header>
 
       <main
-        className="mx-auto w-full max-w-5xl px-6"
+        className="mx-auto flex min-h-svh w-full max-w-5xl flex-col px-6"
         style={{
           paddingTop: headerHeight || undefined,
           paddingBottom: footerHeight || undefined,
         }}
       >
-        <div className="pb-6">
+        <div className="flex flex-1 flex-col pb-6">
           {isError ? (
             <p className="text-sm text-muted-foreground">
               Could not load the feed.
             </p>
           ) : null}
 
-          {!isError && items.length === 0 && isFetching ? <Loading /> : null}
+          {!isError && items.length === 0 && isFetching ? (
+            <div className="flex flex-1 items-center justify-center">
+              <Loading />
+            </div>
+          ) : null}
 
           {!isError && items.length === 0 && !isFetching ? (
-            <p className="text-sm text-muted-foreground">
-              No articles yet. Waiting on the next ingest.
-            </p>
+            <div className="flex flex-1 flex-col items-center justify-center gap-1 text-center">
+              <p className="text-sm">Quiet for now.</p>
+              <p className="text-sm text-muted-foreground">
+                Check back when something happens.
+              </p>
+            </div>
           ) : null}
 
           {!isError && items.length > 0 ? (
@@ -230,40 +272,11 @@ export function FeedPage() {
               ) : null}
               <ul>
                 {items.map((item) => (
-                  <li
-                    className={cn(
-                      "py-2 text-sm",
-                      enteringIds.has(item.id) &&
-                        "animate-in fade-in duration-300",
-                    )}
+                  <NewsRow
+                    entering={enteringIds.has(item.id)}
+                    item={item}
                     key={item.id}
-                  >
-                    <a
-                      className="whitespace-nowrap text-muted-foreground tabular-nums hover:text-blue-600"
-                      href={item.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      <time dateTime={item.publishedAt}>
-                        {formatTime(item.publishedAt)}
-                      </time>
-                      {" -"}
-                    </a>{" "}
-                    <TitleWithTickers
-                      tickers={item.tickers ?? []}
-                      title={item.title}
-                      url={item.url}
-                    />
-                    {" - "}
-                    <a
-                      className="text-muted-foreground hover:text-blue-600"
-                      href={item.url}
-                      rel="noreferrer"
-                      target="_blank"
-                    >
-                      {item.sourceName}
-                    </a>
-                  </li>
+                  />
                 ))}
                 {hasNextPage ? <li ref={sentinelRef} className="h-8" /> : null}
                 {isFetchingNextPage ? (

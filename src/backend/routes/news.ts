@@ -1,21 +1,69 @@
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { Hono } from "hono";
 
+import type {
+  ArticleTicker,
+  NewsDetail,
+  NewsItem,
+  NewsPage,
+} from "../../shared/types";
 import { createDb } from "../db";
-import { articles } from "../db/schema";
+import { articles, events } from "../db/schema";
 import { sourceName } from "../ingest/feeds";
-import type { NewsPage } from "../../shared/types";
-import { CATEGORIES } from "../../shared/types";
+import { decodeCursor, encodeCursor } from "../utils/cursor";
 
-function encodeCursor(publishedAt: Date, id: string) {
-  return `${publishedAt.getTime()}_${id}`;
+type SourceMeta = {
+  tickers: ArticleTicker[] | null;
+  source: string;
+  publishedAt: Date;
+};
+
+function mergeTickers(rows: Array<{ tickers: ArticleTicker[] | null }>): ArticleTicker[] {
+  const seen = new Set<string>();
+  const out: ArticleTicker[] = [];
+  for (const row of rows) {
+    for (const ticker of row.tickers ?? []) {
+      const symbol = ticker.symbol.trim().toUpperCase();
+      if (!symbol || seen.has(symbol)) continue;
+      seen.add(symbol);
+      out.push({ symbol, name: ticker.name });
+    }
+  }
+  return out;
 }
 
-function decodeCursor(cursor: string | undefined) {
-  const [ms, id] = cursor?.split("_", 2) ?? [];
-  const time = Number(ms);
-  if (!id || !Number.isFinite(time)) return null;
-  return { publishedAt: new Date(time), id };
+function sourceNamesFrom(rows: SourceMeta[]): string[] {
+  const ordered = [...rows].sort(
+    (a, b) => b.publishedAt.getTime() - a.publishedAt.getTime(),
+  );
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of ordered) {
+    const name = sourceName(row.source);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+function toDto(
+  row: typeof events.$inferSelect,
+  tickers: ArticleTicker[],
+  sourceNames: string[],
+): NewsItem {
+  return {
+    id: row.id,
+    title: row.title,
+    summary: row.summary,
+    importance: row.importance,
+    confidence: row.confidence,
+    sourceCount: row.sourceCount,
+    sourceNames,
+    tickers,
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    lastSeenAt: row.lastSeenAt.toISOString(),
+  };
 }
 
 export const newsRoutes = new Hono<{ Bindings: CloudflareBindings }>();
@@ -26,44 +74,54 @@ newsRoutes.get("/", async (c) => {
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 30;
   const cursor = decodeCursor(c.req.query("cursor") ?? undefined);
 
-  const filters = [eq(articles.keep, true)];
-  const matchedCategory = CATEGORIES.find((entry) => entry === c.req.query("category"));
-  if (matchedCategory) {
-    filters.push(eq(articles.category, matchedCategory));
-  }
+  const filters = [];
   if (cursor) {
     filters.push(
       or(
-        lt(articles.publishedAt, cursor.publishedAt),
-        and(eq(articles.publishedAt, cursor.publishedAt), lt(articles.id, cursor.id)),
+        lt(events.lastSeenAt, cursor.at),
+        and(eq(events.lastSeenAt, cursor.at), lt(events.id, cursor.id)),
       )!,
     );
   }
 
   const rows = await db
     .select()
-    .from(articles)
-    .where(and(...filters))
-    .orderBy(desc(articles.publishedAt), desc(articles.id))
+    .from(events)
+    .where(filters.length ? and(...filters) : undefined)
+    .orderBy(desc(events.lastSeenAt), desc(events.id))
     .limit(limit + 1);
 
   const pageRows = rows.slice(0, limit);
+  const metaByEvent = new Map<string, SourceMeta[]>();
+  const ids = pageRows.map((row) => row.id);
+
+  if (ids.length > 0) {
+    const sourceRows = await db
+      .select({
+        eventId: articles.eventId,
+        tickers: articles.tickers,
+        source: articles.source,
+        publishedAt: articles.publishedAt,
+      })
+      .from(articles)
+      .where(and(eq(articles.keep, true), inArray(articles.eventId, ids)));
+
+    for (const row of sourceRows) {
+      if (!row.eventId) continue;
+      const list = metaByEvent.get(row.eventId) ?? [];
+      list.push(row);
+      metaByEvent.set(row.eventId, list);
+    }
+  }
+
   const last = pageRows[pageRows.length - 1];
   const payload: NewsPage = {
-    items: pageRows.map((row) => ({
-      id: row.id,
-      source: row.source,
-      sourceName: sourceName(row.source),
-      title: row.title,
-      url: row.url,
-      summary: row.summary || row.rawSummary || row.title,
-      category: row.category,
-      sentiment: row.sentiment,
-      tickers: row.tickers ?? [],
-      publishedAt: row.publishedAt.toISOString(),
-    })),
+    items: pageRows.map((row) => {
+      const meta = metaByEvent.get(row.id) ?? [];
+      return toDto(row, mergeTickers(meta), sourceNamesFrom(meta));
+    }),
     nextCursor:
-      rows.length > limit && last ? encodeCursor(last.publishedAt, last.id) : null,
+      rows.length > limit && last ? encodeCursor(last.lastSeenAt, last.id) : null,
   };
 
   return c.json(payload);
@@ -72,23 +130,26 @@ newsRoutes.get("/", async (c) => {
 newsRoutes.get("/:id", async (c) => {
   const id = c.req.param("id");
   const db = createDb(c.env.DB);
-  const [row] = await db
+  const [row] = await db.select().from(events).where(eq(events.id, id)).limit(1);
+  if (!row) return c.json({ error: "not_found" }, 404);
+
+  const sourceRows = await db
     .select()
     .from(articles)
-    .where(and(eq(articles.id, id), eq(articles.keep, true)))
-    .limit(1);
+    .where(and(eq(articles.eventId, id), eq(articles.keep, true)))
+    .orderBy(desc(articles.publishedAt), desc(articles.id));
 
-  if (!row) return c.json({ error: "not_found" }, 404);
-  return c.json({
-    id: row.id,
-    source: row.source,
-    sourceName: sourceName(row.source),
-    title: row.title,
-    url: row.url,
-    summary: row.summary || row.rawSummary || row.title,
-    category: row.category,
-    sentiment: row.sentiment,
-    tickers: row.tickers ?? [],
-    publishedAt: row.publishedAt.toISOString(),
-  });
+  const payload: NewsDetail = {
+    ...toDto(row, mergeTickers(sourceRows), sourceNamesFrom(sourceRows)),
+    sources: sourceRows.map((article) => ({
+      id: article.id,
+      source: article.source,
+      sourceName: sourceName(article.source),
+      title: article.title,
+      url: article.url,
+      publishedAt: article.publishedAt.toISOString(),
+    })),
+  };
+
+  return c.json(payload);
 });

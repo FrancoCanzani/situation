@@ -102,7 +102,7 @@ const RETIRED_NAMES: Record<string, string> = {
   "bbc-europe": "BBC",
   "cnn-world": "CNN",
   "fox-world": "Fox News",
-  "france24": "France 24",
+  france24: "France 24",
   "guardian-europe": "Guardian",
   "npr-news": "NPR",
   "pbs-news": "PBS",
@@ -111,5 +111,9 @@ const RETIRED_NAMES: Record<string, string> = {
 };
 
 export function sourceName(sourceId: string): string {
-  return FEEDS.find((feed) => feed.id === sourceId)?.name ?? RETIRED_NAMES[sourceId] ?? sourceId;
+  return (
+    FEEDS.find((feed) => feed.id === sourceId)?.name ??
+    RETIRED_NAMES[sourceId] ??
+    sourceId
+  );
 }

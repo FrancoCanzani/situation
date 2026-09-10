@@ -1,7 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { useState } from "react";
 
 import type { MarketQuote } from "@shared/types";
+
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import { cn } from "@/lib/utils";
 
 async function fetchQuote(symbol: string): Promise<MarketQuote> {
   const response = await fetch(
@@ -26,14 +33,28 @@ function formatChange(value: number | null) {
   return `${sign}${abs}%`;
 }
 
-function Sparkline({ points }: { points: number[] }) {
+function changeClass(value: number | null) {
+  if (value == null || !Number.isFinite(value) || value === 0) {
+    return "text-background/60";
+  }
+  if (value > 0) return "text-green-500";
+  return "text-red-500";
+}
+
+function Sparkline({
+  points,
+  className,
+}: {
+  points: number[];
+  className?: string;
+}) {
   if (points.length < 2) return null;
 
   const min = Math.min(...points);
   const max = Math.max(...points);
   const span = max - min || 1;
   const width = 96;
-  const height = 28;
+  const height = 24;
   const path = points
     .map((point, index) => {
       const x = (index / (points.length - 1)) * width;
@@ -45,7 +66,7 @@ function Sparkline({ points }: { points: number[] }) {
   return (
     <svg
       aria-hidden
-      className="mt-1 block text-neutral-500"
+      className={cn("mt-1 block", className)}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
       width={width}
@@ -57,62 +78,56 @@ function Sparkline({ points }: { points: number[] }) {
 
 export function TickerChip({
   symbol,
-  name,
+  label,
 }: {
   symbol: string;
-  name: string;
+  label: string;
 }) {
-  const tipId = useId();
-  const buttonRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
-
-  const { data } = useQuery({
+  const { data, isFetching, isFetched } = useQuery({
     queryKey: ["market", "quote", symbol],
     queryFn: () => fetchQuote(symbol),
     enabled: open,
     staleTime: 60_000,
   });
 
-  useEffect(() => {
-    if (!open || !buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    setPos({ top: rect.bottom + 4, left: rect.left });
-  }, [open]);
-
   return (
-    <span
-      className="relative inline-block"
-      onBlur={() => setOpen(false)}
-      onFocus={() => setOpen(true)}
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
-      <button
-        aria-describedby={open ? tipId : undefined}
-        className="font-bold text-inherit hover:text-blue-600"
-        ref={buttonRef}
-        type="button"
+    <HoverCard onOpenChange={setOpen} open={open}>
+      <HoverCardTrigger
+        className="font-bold text-blue-600"
+        closeDelay={100}
+        delay={200}
+        render={<span />}
       >
-        #{symbol}
-      </button>
-      {open ? (
-        <span
-          className="fixed z-30 w-40 bg-background py-2 text-left text-sm text-neutral-500"
-          id={tipId}
-          role="tooltip"
-          style={{ top: pos.top, left: pos.left }}
-        >
-          <span className="block text-foreground">{data?.name ?? name}</span>
-          <span className="block tabular-nums">
-            {formatPrice(data?.price ?? null)}
-            {data?.changePercent != null
-              ? ` (${formatChange(data.changePercent)})`
-              : null}
-          </span>
-          <Sparkline points={data?.points ?? []} />
+        {label}
+      </HoverCardTrigger>
+      <HoverCardContent
+        className="w-auto max-w-56 bg-foreground p-2 text-background ring-0"
+        side="top"
+        sideOffset={6}
+      >
+        <span className="block tabular-nums">
+          {symbol}{" "}
+          {data ? (
+            <>
+              {formatPrice(data.price)}{" "}
+              <span className={changeClass(data.changePercent)}>
+                {formatChange(data.changePercent)}
+              </span>
+            </>
+          ) : isFetching ? (
+            <span className="text-background/60">…</span>
+          ) : isFetched ? (
+            <span className="text-background/60">—</span>
+          ) : null}
         </span>
-      ) : null}
-    </span>
+        {data?.points?.length ? (
+          <Sparkline
+            className={changeClass(data.changePercent)}
+            points={data.points}
+          />
+        ) : null}
+      </HoverCardContent>
+    </HoverCard>
   );
 }

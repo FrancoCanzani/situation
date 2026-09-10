@@ -18,6 +18,13 @@
       "migrations_dir": "src/backend/db/migrations"
     }
   ],
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "situation-events",
+      "remote": true
+    }
+  ],
   "ai": {
     "binding": "AI",
     "remote": true

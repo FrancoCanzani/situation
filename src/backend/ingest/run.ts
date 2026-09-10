@@ -4,6 +4,7 @@ import type { ArticleTicker } from "../../shared/types";
 import type { Db } from "../db";
 import { articles } from "../db/schema";
 import { resolveMentions } from "../market/resolve";
+import { assignArticleEvent } from "./events";
 import { FEEDS } from "./feeds";
 import { parseFeedXml, type ParsedItem } from "./parse";
 import {
@@ -26,6 +27,8 @@ export type IngestResult = {
   hidden: number;
   polished: number;
   unpolished: number;
+  clustered: number;
+  eventsCreated: number;
   errors: string[];
 };
 
@@ -37,6 +40,8 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
     hidden: 0,
     polished: 0,
     unpolished: 0,
+    clustered: 0,
+    eventsCreated: 0,
     errors: [],
   };
 
@@ -150,10 +155,12 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
 
     if (!keep) result.hidden += 1;
 
+    const articleId = crypto.randomUUID();
+
     await db
       .insert(articles)
       .values({
-        id: crypto.randomUUID(),
+        id: articleId,
         url: item.url,
         source: item.source,
         title: item.title,
@@ -170,6 +177,24 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
       .onConflictDoNothing();
 
     result.inserted += 1;
+
+    if (keep && ai) {
+      try {
+        const clustered = await assignArticleEvent(env, db, {
+          articleId,
+          title: item.title,
+          summary,
+          importance,
+          publishedAt: item.publishedAt,
+        });
+        result.clustered += 1;
+        if (clustered.created) result.eventsCreated += 1;
+      } catch (error) {
+        const message = formatAiError(error);
+        result.errors.push(`${item.source} ${item.title}: event ${message}`);
+        console.error("[ingest] event", item.source, item.title, message);
+      }
+    }
   }
 
   return result;

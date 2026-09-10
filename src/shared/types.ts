@@ -26,22 +26,35 @@ export type ArticleTicker = {
   name: string;
 };
 
-export type ArticleDto = {
+export type NewsSource = {
   id: string;
   source: string;
   sourceName: string;
   title: string;
   url: string;
-  summary: string;
-  category: Category;
-  sentiment: Sentiment;
-  tickers: ArticleTicker[];
   publishedAt: string;
 };
 
+export type NewsItem = {
+  id: string;
+  title: string;
+  summary: string;
+  importance: number | null;
+  confidence: number;
+  sourceCount: number;
+  sourceNames: string[];
+  tickers: ArticleTicker[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+};
+
 export type NewsPage = {
-  items: ArticleDto[];
+  items: NewsItem[];
   nextCursor: string | null;
+};
+
+export type NewsDetail = NewsItem & {
+  sources: NewsSource[];
 };
 
 export type MarketBannerItem = {

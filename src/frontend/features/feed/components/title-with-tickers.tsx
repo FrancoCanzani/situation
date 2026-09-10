@@ -40,10 +40,6 @@ function segmentsFor(title: string, tickers: ArticleTicker[]): Segment[] {
       segments.push({ type: "text", value: title.slice(cursor, match.index) });
     }
     segments.push({
-      type: "text",
-      value: match.name,
-    });
-    segments.push({
       type: "ticker",
       name: match.name,
       symbol: match.symbol,
@@ -65,7 +61,7 @@ export function TitleWithTickers({
 }: {
   title: string;
   tickers: ArticleTicker[];
-  url: string;
+  url?: string;
 }) {
   const segments = segmentsFor(title, tickers);
 
@@ -74,14 +70,19 @@ export function TitleWithTickers({
       {segments.map((segment, index) => {
         if (segment.type === "ticker") {
           return (
-            <span key={`t-${segment.symbol}-${index}`}>
-              {" "}
-              <TickerChip name={segment.name} symbol={segment.symbol} />
-            </span>
+            <TickerChip
+              key={`t-${segment.symbol}-${index}`}
+              label={segment.name}
+              symbol={segment.symbol}
+            />
           );
         }
 
         if (!segment.value) return null;
+
+        if (!url) {
+          return <span key={`s-${index}`}>{segment.value}</span>;
+        }
 
         return (
           <a
