@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "situation",
-      "database_id": "00000000-0000-0000-0000-000000000001",
+      "database_id": "62b16041-2789-4a8c-832e-f43417e22f7a",
       "migrations_dir": "src/backend/db/migrations"
     }
   ],

@@ -1,6 +1,6 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-import type { ArticleTicker, Category, Sentiment } from "../../shared/types";
+import type { Category, Sentiment } from "../../shared/types";
 
 export const events = sqliteTable("events", {
   id: text("id").primaryKey(),
@@ -9,8 +9,11 @@ export const events = sqliteTable("events", {
   importance: integer("importance"),
   confidence: integer("confidence").notNull().default(33),
   sourceCount: integer("source_count").notNull().default(1),
+  countryCode: text("country_code"),
+  imageUrl: text("image_url"),
   firstSeenAt: integer("first_seen_at", { mode: "timestamp_ms" }).notNull(),
   lastSeenAt: integer("last_seen_at", { mode: "timestamp_ms" }).notNull(),
+  bumpedAt: integer("bumped_at", { mode: "timestamp_ms" }).notNull(),
 });
 
 export const articles = sqliteTable("articles", {
@@ -20,13 +23,9 @@ export const articles = sqliteTable("articles", {
   title: text("title").notNull(),
   rawSummary: text("raw_summary").notNull().default(""),
   summary: text("summary").notNull().default(""),
-  category: text("category").$type<Category>().notNull().default("other"),
+  category: text("category").$type<Category>().notNull().default("politics"),
   sentiment: text("sentiment").$type<Sentiment>().notNull().default("neutral"),
   importance: integer("importance"),
-  tickers: text("tickers", { mode: "json" })
-    .$type<ArticleTicker[]>()
-    .notNull()
-    .default([]),
   keep: integer("keep", { mode: "boolean" }).notNull().default(true),
   eventId: text("event_id").references(() => events.id),
   publishedAt: integer("published_at", { mode: "timestamp_ms" }).notNull(),

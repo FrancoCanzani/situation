@@ -21,14 +21,6 @@ type ChartResult = {
   };
 };
 
-type SearchQuote = {
-  symbol?: string;
-  shortname?: string;
-  longname?: string;
-  quoteType?: string;
-  exchDisp?: string;
-};
-
 export type YahooQuote = {
   symbol: string;
   name: string;
@@ -36,12 +28,6 @@ export type YahooQuote = {
   previousClose: number | null;
   changePercent: number | null;
   points: number[];
-};
-
-export type YahooSearchHit = {
-  symbol: string;
-  name: string;
-  type: string;
 };
 
 function changePercent(price: number | null, previous: number | null) {
@@ -95,24 +81,4 @@ export async function fetchYahooChart(
     changePercent: changePercent(price, previousClose),
     points,
   };
-}
-
-export async function searchYahoo(query: string): Promise<YahooSearchHit[]> {
-  const url =
-    `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}` +
-    `&quotesCount=8&newsCount=0`;
-  const response = await fetch(url, {
-    headers: YAHOO_HEADERS,
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (!response.ok) return [];
-
-  const data = (await response.json()) as { quotes?: SearchQuote[] };
-  return (data.quotes ?? [])
-    .map((quote) => ({
-      symbol: (quote.symbol ?? "").trim().toUpperCase(),
-      name: (quote.shortname || quote.longname || quote.symbol || "").trim(),
-      type: (quote.quoteType ?? "").toUpperCase(),
-    }))
-    .filter((hit) => hit.symbol.length > 0);
 }

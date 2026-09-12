@@ -1,36 +1,22 @@
-import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, lt, or } from "drizzle-orm";
 import { Hono } from "hono";
 
-import type {
-  ArticleTicker,
-  NewsDetail,
-  NewsItem,
-  NewsPage,
+import {
+  CATEGORIES,
+  type Category,
+  type NewsDetail,
+  type NewsItem,
+  type NewsPage,
 } from "../../shared/types";
 import { createDb } from "../db";
 import { articles, events } from "../db/schema";
-import { sourceName } from "../ingest/feeds";
+import { sourceName } from "../ingest/sources";
 import { decodeCursor, encodeCursor } from "../utils/cursor";
 
 type SourceMeta = {
-  tickers: ArticleTicker[] | null;
   source: string;
   publishedAt: Date;
 };
-
-function mergeTickers(rows: Array<{ tickers: ArticleTicker[] | null }>): ArticleTicker[] {
-  const seen = new Set<string>();
-  const out: ArticleTicker[] = [];
-  for (const row of rows) {
-    for (const ticker of row.tickers ?? []) {
-      const symbol = ticker.symbol.trim().toUpperCase();
-      if (!symbol || seen.has(symbol)) continue;
-      seen.add(symbol);
-      out.push({ symbol, name: ticker.name });
-    }
-  }
-  return out;
-}
 
 function sourceNamesFrom(rows: SourceMeta[]): string[] {
   const ordered = [...rows].sort(
@@ -47,9 +33,15 @@ function sourceNamesFrom(rows: SourceMeta[]): string[] {
   return out;
 }
 
+function isCategory(value: string): value is Category {
+  for (const category of CATEGORIES) {
+    if (category === value) return true;
+  }
+  return false;
+}
+
 function toDto(
   row: typeof events.$inferSelect,
-  tickers: ArticleTicker[],
   sourceNames: string[],
 ): NewsItem {
   return {
@@ -60,9 +52,12 @@ function toDto(
     confidence: row.confidence,
     sourceCount: row.sourceCount,
     sourceNames,
-    tickers,
+    countryCode: row.countryCode,
+    imageUrl: row.imageUrl,
     firstSeenAt: row.firstSeenAt.toISOString(),
     lastSeenAt: row.lastSeenAt.toISOString(),
+    bumpedAt: row.bumpedAt.toISOString(),
+    updated: row.bumpedAt.getTime() > row.firstSeenAt.getTime(),
   };
 }
 
@@ -73,13 +68,32 @@ newsRoutes.get("/", async (c) => {
   const limitRaw = Number(c.req.query("limit") ?? "30");
   const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 30;
   const cursor = decodeCursor(c.req.query("cursor") ?? undefined);
+  const categoryRaw = c.req.query("category");
+  const category =
+    categoryRaw && isCategory(categoryRaw) ? categoryRaw : undefined;
 
   const filters = [];
+  if (category) {
+    filters.push(
+      exists(
+        db
+          .select({ id: articles.id })
+          .from(articles)
+          .where(
+            and(
+              eq(articles.eventId, events.id),
+              eq(articles.keep, true),
+              eq(articles.category, category),
+            ),
+          ),
+      ),
+    );
+  }
   if (cursor) {
     filters.push(
       or(
-        lt(events.lastSeenAt, cursor.at),
-        and(eq(events.lastSeenAt, cursor.at), lt(events.id, cursor.id)),
+        lt(events.bumpedAt, cursor.at),
+        and(eq(events.bumpedAt, cursor.at), lt(events.id, cursor.id)),
       )!,
     );
   }
@@ -88,7 +102,7 @@ newsRoutes.get("/", async (c) => {
     .select()
     .from(events)
     .where(filters.length ? and(...filters) : undefined)
-    .orderBy(desc(events.lastSeenAt), desc(events.id))
+    .orderBy(desc(events.bumpedAt), desc(events.id))
     .limit(limit + 1);
 
   const pageRows = rows.slice(0, limit);
@@ -99,7 +113,6 @@ newsRoutes.get("/", async (c) => {
     const sourceRows = await db
       .select({
         eventId: articles.eventId,
-        tickers: articles.tickers,
         source: articles.source,
         publishedAt: articles.publishedAt,
       })
@@ -118,10 +131,10 @@ newsRoutes.get("/", async (c) => {
   const payload: NewsPage = {
     items: pageRows.map((row) => {
       const meta = metaByEvent.get(row.id) ?? [];
-      return toDto(row, mergeTickers(meta), sourceNamesFrom(meta));
+      return toDto(row, sourceNamesFrom(meta));
     }),
     nextCursor:
-      rows.length > limit && last ? encodeCursor(last.lastSeenAt, last.id) : null,
+      rows.length > limit && last ? encodeCursor(last.bumpedAt, last.id) : null,
   };
 
   return c.json(payload);
@@ -140,7 +153,7 @@ newsRoutes.get("/:id", async (c) => {
     .orderBy(desc(articles.publishedAt), desc(articles.id));
 
   const payload: NewsDetail = {
-    ...toDto(row, mergeTickers(sourceRows), sourceNamesFrom(sourceRows)),
+    ...toDto(row, sourceNamesFrom(sourceRows)),
     sources: sourceRows.map((article) => ({
       id: article.id,
       source: article.source,

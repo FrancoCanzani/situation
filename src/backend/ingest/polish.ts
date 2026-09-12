@@ -3,7 +3,6 @@ import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
 
 import { CATEGORIES, SENTIMENTS } from "../../shared/types";
-import type { Mention } from "../market/resolve";
 
 const KEEP_IMPORTANCE = 7;
 
@@ -17,15 +16,6 @@ const polishSchema = z.object({
   sentiment: z.enum(SENTIMENTS),
   summary: z.string(),
   discardReason: z.string().optional(),
-  mentions: z
-    .array(
-      z.object({
-        name: z.string(),
-        ticker: z.string().optional(),
-      }),
-    )
-    .max(3)
-    .optional(),
 });
 
 const POLISH_MODEL = "@cf/zai-org/glm-4.7-flash";
@@ -37,7 +27,6 @@ export type PolishResult = {
   category: (typeof CATEGORIES)[number];
   sentiment: (typeof SENTIMENTS)[number];
   summary: string;
-  mentions: Mention[];
   discardReason?: string;
 };
 
@@ -65,46 +54,57 @@ export async function polishArticle(
     output: Output.object({
       name: "ArticlePolish",
       description:
-        "Score a headline for a world news wire: require an informative news-event title, then extract listed companies.",
+        "Score a headline for a national/international news wire.",
       schema: polishSchema,
     }),
     prompt: [
-      "You gate news for Situation, a world-important news wire.",
+      "You gate news for Situation, a US/UK/Europe national news wire.",
       "Return structured JSON only. Do not rewrite the headline.",
       "",
       "Judge the Title first. The Title must itself report a new fact or event",
-      "(who/what/where/when). Topic gravity alone is not enough: a soft headline",
-      "about a major subject (war, 9/11, elections, markets) still scores low.",
+      "(who/what/where/when). Topic gravity alone is not enough.",
       "",
-      "importance: integer 0–10 for how world-important this reported news event is.",
-      "10 = major geopolitics, war, disaster, market-moving, elections, courts with public stake.",
-      "7–9 = clear news event worth the wire; Title states what newly happened or was newly reported.",
-      "4–6 = narrow or soft news.",
-      "0–3 = non-informative Title, opinion, lifestyle, listicle, sports score, celebrity, evergreen, ad, live blog.",
-      "Feed only shows importance ≥ 7. When unsure, score below 7.",
+      "importance: integer 0–10. Feed only shows importance ≥ 7. When unsure, score below 7.",
+      "≥ 7 = would run high on a national desk in the US, UK, or a major EU capital,",
+      "or is clearly market-moving / geopolitically consequential. Notable, not merely topical.",
+      "10 = major geopolitics, war, disaster, market-moving shock, national elections, high courts.",
+      "7–9 = clear national/international news event; Title states what newly happened.",
+      "4–6 = narrow, soft, or sub-national news.",
+      "0–3 = non-informative Title, opinion, lifestyle, listicle, celebrity, evergreen, ad.",
       "",
-      "Score below 7 when the Title is not an informative news lead, including:",
-      "- anniversaries, remembrances, 'X years after', 'still lingers', look-backs",
-      "- quote-led soft features ('…': how/why…) with no new action in the Title",
-      "- 'how X happened/responded', oral history, retrospectives with no new development",
-      "- vague thesis Titles: 'devastating truth', 'what it means', 'the real story', 'lessons from'",
-      "- explainers, evergreens, analysis, features that rehash a known event",
+      "Score below 7 for local or desk-fill, including:",
+      "- city/county/state-only politics or crime without national stake",
+      "- regional weather, traffic, schools, municipal budgets",
+      "- routine earnings noise, minor product launches, small funding rounds",
+      "- sports scores, fixtures, injury notes (bans/corruption/ownership can score higher)",
+      "- tech gadget reviews, shopping, how-tos",
+      "",
+      "Also score below 7 when the Title is not an informative news lead:",
+      "- anniversaries, remembrances, look-backs, 'X years after'",
+      "- quote-led soft features with no new action in the Title",
+      "- explainers, evergreens, analysis, 'what it means', oral history",
       "",
       "Also score low (0–3) for:",
-      "- ads, affiliate, sponsored, credit cards, product roundups, 'best of' shopping",
-      "- live blogs, live results, match trackers, rolling 'politics live' / 'Europe live' pages",
-      "- sports matches, scores, fixtures; sports news events (ban, death, corruption) can score higher",
-      "- celebrity, entertainment, interviews, awards, culture features",
-      "- human-interest / viral video / true-crime-as-entertainment with no public-event stake",
-      "- opinion, op-eds, columns, analysis, editorials, 'containing X', guest essays",
+      "- ads, affiliate, sponsored, product roundups",
+      "- live blogs, live results, match trackers, rolling live pages",
+      "- celebrity, entertainment, awards, culture features",
+      "- opinion, op-eds, columns, editorials, guest essays",
       "- recipes, lifestyle, listicles, horoscopes, betting, fantasy sports",
       "",
-      "summary: 1-2 neutral factual sentences. No hot takes. Unused in the list UI.",
-      "category: one of world, politics, business, tech, science, health, climate, sports, other.",
+      "summary: 1-2 neutral factual sentences. No hot takes.",
+      "category: one of politics, business, tech, sports. Pick one primary desk.",
+      "politics = government, elections, war, diplomacy, courts with public stake, geopolitics.",
+      "business = markets, listed companies, earnings, M&A, economy, corp strategy,",
+      "product unveilings / recalls / production from public companies, regulation that moves money.",
+      "tech = platforms, AI research, chips/semiconductors, cyber, infra, open-source,",
+      "or pure tech-regulatory fights — not every story that involves a tech firm.",
+      "sports = notable sports news only (not scores).",
+      "When both fit: public company / stock / market stake → business (even product launches).",
+      "Tesla/Apple/Amazon product or factory news → business. ChatGPT model drop → tech.",
+      "Disasters / public health with political stake → politics.",
+      "Always pick the closest of those four. Never invent another bucket.",
       "sentiment: tone of the event (positive/negative/neutral/mixed), not writing style.",
-      "discardReason: short label if importance < 7 (e.g. anniversary, non-informative-title, opinion).",
-      "mentions: up to 3 publicly traded companies named in the Title (exact spelling as in Title).",
-      "Include ticker only if you are sure (e.g. AAPL). Empty array if none.",
+      "discardReason: short label if importance < 7.",
       "",
       `Source: ${input.source}`,
       `Title: ${input.title}`,
@@ -119,7 +119,6 @@ export async function polishArticle(
     category: output.category,
     sentiment: output.sentiment,
     summary: output.summary.trim() || input.rawSummary.slice(0, 400) || input.title,
-    mentions: output.mentions ?? [],
     discardReason: output.discardReason,
   };
 }

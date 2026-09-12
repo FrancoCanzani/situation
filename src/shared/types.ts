@@ -1,30 +1,15 @@
 export const CATEGORIES = [
-  "world",
   "politics",
   "business",
   "tech",
-  "science",
-  "health",
-  "climate",
   "sports",
-  "other",
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
 
-export const SENTIMENTS = [
-  "positive",
-  "negative",
-  "neutral",
-  "mixed",
-] as const;
+export const SENTIMENTS = ["positive", "negative", "neutral", "mixed"] as const;
 
 export type Sentiment = (typeof SENTIMENTS)[number];
-
-export type ArticleTicker = {
-  symbol: string;
-  name: string;
-};
 
 export type NewsSource = {
   id: string;
@@ -43,9 +28,12 @@ export type NewsItem = {
   confidence: number;
   sourceCount: number;
   sourceNames: string[];
-  tickers: ArticleTicker[];
+  countryCode: string | null;
+  imageUrl: string | null;
   firstSeenAt: string;
   lastSeenAt: string;
+  bumpedAt: string;
+  updated: boolean;
 };
 
 export type NewsPage = {
@@ -65,14 +53,5 @@ export type MarketBannerItem = {
 
 export type MarketBanner = {
   items: MarketBannerItem[];
-  asOf: string;
-};
-
-export type MarketQuote = {
-  symbol: string;
-  name: string;
-  price: number | null;
-  changePercent: number | null;
-  points: number[];
   asOf: string;
 };

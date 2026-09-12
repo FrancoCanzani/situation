@@ -3,12 +3,12 @@ import { useState } from "react";
 
 import type { NewsDetail } from "@shared/types";
 
-import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
 import { Loading } from "@/components/loading";
+import {
+    HoverCard,
+    HoverCardContent,
+    HoverCardTrigger,
+} from "@/components/ui/hover-card";
 
 async function fetchNewsDetail(id: string): Promise<NewsDetail> {
   const response = await fetch(`/api/news/${id}`);
@@ -39,11 +39,12 @@ export function SourceCitation({
         className="text-muted-foreground hover:text-blue-600"
         closeDelay={100}
         delay={200}
+        onClick={(event) => event.stopPropagation()}
         render={<button type="button" />}
       >
         {label}
       </HoverCardTrigger>
-      <HoverCardContent align="start" className="w-80 p-2" side="top" sideOffset={6}>
+      <HoverCardContent align="start" className="w-56 p-2" side="top" sideOffset={6}>
         {detailQuery.isLoading ? (
           <Loading />
         ) : detailQuery.isError ? (

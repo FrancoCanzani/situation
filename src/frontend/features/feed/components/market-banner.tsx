@@ -61,12 +61,12 @@ export function MarketBanner() {
   return (
     <div
       className={cn(
-        "overflow-hidden motion-reduce:overflow-x-auto",
+        "shrink-0 overflow-hidden border-t bg-background py-2 font-pixel motion-reduce:overflow-x-auto",
         "[mask-image:linear-gradient(to_right,transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]",
         "[-webkit-mask-image:linear-gradient(to_right,transparent,black_1.5rem,black_calc(100%-1.5rem),transparent)]",
       )}
     >
-      <div className="flex w-max animate-tape hover:[animation-play-state:paused] motion-reduce:animate-none">
+      <div className="flex w-max animate-tape hover:paused motion-reduce:animate-none">
         <Track items={data.items} />
         <Track duplicate items={data.items} />
       </div>

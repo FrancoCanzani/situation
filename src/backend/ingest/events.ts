@@ -8,20 +8,33 @@ import { formatAiError, polishModel } from "./polish";
 
 const EMBED_MODEL = "@cf/baai/bge-base-en-v1.5";
 const CLUSTER_WINDOW_MS = 48 * 60 * 60 * 1000;
-const QUERY_TOP_K = 8;
-const AUTO_MERGE_SCORE = 0.86;
-const CANDIDATE_SCORE = 0.72;
-const EXTRACT_MAX_TOKENS = 200;
+const QUERY_TOP_K = 12;
+const AUTO_MERGE_SCORE = 0.8;
+const CANDIDATE_SCORE = 0.68;
+const EXTRACT_MAX_TOKENS = 220;
 const EXTRACT_TIMEOUT_MS = 6_000;
 const MATCH_TIMEOUT_MS = 6_000;
+const DEVELOP_TIMEOUT_MS = 6_000;
 
 const extractSchema = z.object({
   title: z.string(),
   summary: z.string(),
+  countryCode: z
+    .string()
+    .nullable()
+    .transform((value) => {
+      if (!value) return null;
+      const code = value.trim().toUpperCase();
+      return /^[A-Z]{2}$/.test(code) ? code : null;
+    }),
 });
 
 const matchSchema = z.object({
   sameEvent: z.boolean(),
+});
+
+const developSchema = z.object({
+  isDevelopment: z.boolean(),
 });
 
 export type ClusterInput = {
@@ -30,7 +43,19 @@ export type ClusterInput = {
   summary: string;
   importance: number | null;
   publishedAt: Date;
+  imageUrl?: string | null;
 };
+
+function eventImageUrl(
+  importance: number | null | undefined,
+  candidate: string | null | undefined,
+  existing?: string | null,
+): string | null {
+  if (existing) return existing;
+  if ((importance ?? 0) <= 9) return null;
+  const url = candidate?.trim();
+  return url && /^https?:\/\//i.test(url) ? url : null;
+}
 
 function confidenceFromSources(sourceCount: number): number {
   return Math.min(100, Math.round((sourceCount / 3) * 100));
@@ -50,7 +75,7 @@ async function embedText(ai: Ai, text: string): Promise<number[]> {
 async function extractEvent(
   ai: Ai,
   input: { title: string; summary: string },
-): Promise<{ title: string; summary: string }> {
+): Promise<{ title: string; summary: string; countryCode: string | null }> {
   const { output, finishReason } = await generateText({
     model: polishModel(ai),
     maxRetries: 0,
@@ -65,6 +90,8 @@ async function extractEvent(
       "Extract the underlying news event from this article.",
       "title: short factual wire headline of what happened (not outlet voice).",
       "summary: 1-2 neutral sentences.",
+      "countryCode: ISO 3166-1 alpha-2 for the primary place of the event, or null if unclear/global.",
+      "Use the country where the event mainly happens, not the outlet's country.",
       "Do not invent facts. Prefer concrete who/what/where.",
       "",
       `Title: ${input.title}`,
@@ -77,6 +104,7 @@ async function extractEvent(
     title: output.title.trim() || input.title,
     summary:
       output.summary.trim() || input.summary.slice(0, 400) || input.title,
+    countryCode: output.countryCode,
   };
 }
 
@@ -96,9 +124,11 @@ async function sameEvent(
       schema: matchSchema,
     }),
     prompt: [
-      "Do these two reports describe the same real-world event?",
-      "sameEvent=true only if they are the same occurrence, not merely the same topic.",
-      "When unsure, sameEvent=false.",
+      "Do these two reports describe the same real-world event or the same developing story?",
+      "sameEvent=true if they are the same occurrence or the same story as it unfolds",
+      "(same actors, same action, same window), even if outlets word it differently or add a detail.",
+      "sameEvent=false if they are merely the same topic or two distinct incidents.",
+      "When they look like two writes of one story, sameEvent=true.",
       "",
       `A title: ${candidate.title}`,
       `A summary: ${candidate.summary.slice(0, 400)}`,
@@ -110,6 +140,41 @@ async function sameEvent(
 
   if (!output) throw new Error(`empty event match (${finishReason})`);
   return output.sameEvent;
+}
+
+async function isDevelopment(
+  ai: Ai,
+  candidate: { title: string; summary: string },
+  existing: { title: string; summary: string },
+): Promise<boolean> {
+  const { output, finishReason } = await generateText({
+    model: polishModel(ai),
+    maxRetries: 0,
+    maxOutputTokens: 64,
+    abortSignal: AbortSignal.timeout(DEVELOP_TIMEOUT_MS),
+    output: Output.object({
+      name: "EventDevelopment",
+      description:
+        "Whether a new report adds a material development to an existing event.",
+      schema: developSchema,
+    }),
+    prompt: [
+      "Report A is a new article. Event B is an existing clustered story.",
+      "isDevelopment=true only if A adds a material new fact, decision, casualty figure,",
+      "location shift, or clear next step in the same story — not just another outlet restating B.",
+      "isDevelopment=false for corroboration, wording changes, or minor color.",
+      "When unsure, isDevelopment=false.",
+      "",
+      `A title: ${candidate.title}`,
+      `A summary: ${candidate.summary.slice(0, 400)}`,
+      "",
+      `B title: ${existing.title}`,
+      `B summary: ${existing.summary.slice(0, 400)}`,
+    ].join("\n"),
+  });
+
+  if (!output) throw new Error(`empty event development (${finishReason})`);
+  return output.isDevelopment;
 }
 
 async function resolveMatch(
@@ -176,7 +241,7 @@ export async function assignArticleEvent(
   env: CloudflareBindings,
   db: Db,
   input: ClusterInput,
-): Promise<{ eventId: string; created: boolean }> {
+): Promise<{ eventId: string; created: boolean; bumped: boolean }> {
   const ai = env.AI;
   if (!ai) throw new Error("AI binding missing");
 
@@ -208,6 +273,8 @@ export async function assignArticleEvent(
     }
   }
 
+  let bumped = false;
+
   if (eventId) {
     const [existing] = await db
       .select()
@@ -222,6 +289,23 @@ export async function assignArticleEvent(
         existing.importance ?? 0,
         input.importance ?? 0,
       );
+
+      let development = false;
+      try {
+        development = await isDevelopment(ai, extracted, {
+          title: existing.title,
+          summary: existing.summary,
+        });
+      } catch (error) {
+        console.error("[ingest] event-develop", formatAiError(error));
+      }
+
+      bumped = development;
+      const imageUrl = eventImageUrl(
+        importance,
+        input.imageUrl,
+        existing.imageUrl,
+      );
       await db
         .update(events)
         .set({
@@ -229,6 +313,17 @@ export async function assignArticleEvent(
           sourceCount,
           confidence: confidenceFromSources(sourceCount),
           importance,
+          ...(imageUrl && imageUrl !== existing.imageUrl ? { imageUrl } : {}),
+          ...(development
+            ? {
+                bumpedAt: now,
+                title: extracted.title,
+                summary: extracted.summary,
+                countryCode: extracted.countryCode ?? existing.countryCode,
+              }
+            : {
+                countryCode: existing.countryCode ?? extracted.countryCode,
+              }),
         })
         .where(eq(events.id, eventId));
     }
@@ -238,6 +333,7 @@ export async function assignArticleEvent(
   if (!eventId) {
     eventId = crypto.randomUUID();
     created = true;
+    bumped = true;
     await db.insert(events).values({
       id: eventId,
       title: extracted.title,
@@ -245,8 +341,11 @@ export async function assignArticleEvent(
       importance: input.importance,
       confidence: confidenceFromSources(1),
       sourceCount: 1,
+      countryCode: extracted.countryCode,
+      imageUrl: eventImageUrl(input.importance, input.imageUrl),
       firstSeenAt: now,
       lastSeenAt: now,
+      bumpedAt: now,
     });
   }
 
@@ -269,5 +368,5 @@ export async function assignArticleEvent(
     }
   }
 
-  return { eventId, created };
+  return { eventId, created, bumped };
 }

@@ -46,11 +46,15 @@ Call `fetch` where the result is used. Do not wrap one-off requests in named API
 
 - Name: **Situation**
 - World-important news wire: ingest → clean (Workers AI) → D1 → feed
-- Categories: world, politics, business, tech, science, health, climate, sports, other
+- Categories: politics, business, tech, sports
 - Soft-hide junk with `keep = false` (opinion, recipes, listicles, lifestyle)
 
 ## UI
 
 - Flat, minimal, monochrome-first. No card chrome, no all-caps labels.
-- Font weights: 400 default, 700 for emphasis only (no medium/semibold).
+- Font weights: 400 default, 700 for emphasis only (no medium/semibold). After `shadcn add`, replace any `font-medium` / `font-semibold` in new UI with `font-normal` or `font-bold`.
 - Tailwind utilities in components; `index.css` for tokens/base only.
+- **Use shadcn** (`components/ui/`, `bunx shadcn@latest add <name> --yes`). Do not hand-roll dialogs, menus, popovers, sheets, or other primitives that shadcn already covers.
+- `components.json`: `style` `base-nova`, `iconLibrary` **`lucide`** (not `radix` — radix breaks IconPlaceholder transforms and leaves broken imports).
+- UI components import `cn` from `"cn"`. App code may use `@/lib/utils` (re-exports `cn`).
+- `shadcn add` may overwrite `button.tsx` as a dependency — restore project button styles afterward; keep `icon-sm` if dialog/sheet need it.
