@@ -52,7 +52,7 @@ function eventImageUrl(
   existing?: string | null,
 ): string | null {
   if (existing) return existing;
-  if ((importance ?? 0) <= 9) return null;
+  if ((importance ?? 0) <= 8) return null;
   const url = candidate?.trim();
   return url && /^https?:\/\//i.test(url) ? url : null;
 }

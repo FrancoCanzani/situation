@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 
+import { ThemeProvider } from "@/components/theme-provider";
+
 import { routeTree } from "./routeTree.gen";
 
 const queryClient = new QueryClient({
@@ -27,7 +29,9 @@ declare module "@tanstack/react-router" {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+        <RouterProvider router={router} />
+      </ThemeProvider>
     </QueryClientProvider>
   );
 }

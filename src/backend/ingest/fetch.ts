@@ -34,7 +34,7 @@ export class FetchError extends Error {
   }
 }
 
-export async function articlesFor(source: Source): Promise<RawArticle[]> {
+export async function fetchArticles(source: Source): Promise<RawArticle[]> {
   if (source.fetch) return source.fetch();
   if (!source.rss) throw new FetchError(`${source.id}: need rss or fetch`);
   return fetchRss(source.rss);

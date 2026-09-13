@@ -7,6 +7,10 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
+export const FEED_SORTS = ["date", "relevance"] as const;
+
+export type FeedSort = (typeof FEED_SORTS)[number];
+
 export const SENTIMENTS = ["positive", "negative", "neutral", "mixed"] as const;
 
 export type Sentiment = (typeof SENTIMENTS)[number];
@@ -28,6 +32,8 @@ export type NewsItem = {
   confidence: number;
   sourceCount: number;
   sourceNames: string[];
+  category: Category | null;
+  sentiment: Sentiment | null;
   countryCode: string | null;
   imageUrl: string | null;
   firstSeenAt: string;

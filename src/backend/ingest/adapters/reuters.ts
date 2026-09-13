@@ -134,7 +134,7 @@ async function mapPool<T, R>(
   limit: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
-  const out = new Array<R>(items.length);
+  const out = Array.from({ length: items.length }) as R[];
   let next = 0;
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     for (let index = next++; index < items.length; index = next++) {

@@ -1,11 +1,21 @@
+import { getRouteApi } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
-import { FEED_TOPICS } from "../lib/topics";
+import {
+  mobileTopic,
+  parseCols,
+  type FeedTopic,
+} from "../lib/topics";
 import { FeedHeader } from "./feed-header";
 import { MarketBanner } from "./market-banner";
 import { TopicColumn } from "./topic-column";
 
+const routeApi = getRouteApi("/");
+
 export function FeedPage() {
+  const { cols: colsParam } = routeApi.useSearch();
+  const cols = parseCols(colsParam);
+  const solo = mobileTopic(cols);
   const deckRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -37,11 +47,12 @@ export function FeedPage() {
         className="flex min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-hidden overscroll-x-contain md:overflow-x-auto"
         ref={deckRef}
       >
-        {FEED_TOPICS.map((topic) => (
+        {cols.map((topic: FeedTopic) => (
           <TopicColumn
             deckRef={deckRef}
-            eager={topic === "all"}
+            eager={topic === solo}
             key={topic}
+            soloOnMobile={topic === solo}
             topic={topic}
           />
         ))}

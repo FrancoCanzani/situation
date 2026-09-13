@@ -3,13 +3,13 @@ import { inArray } from "drizzle-orm";
 import type { Db } from "../db";
 import { articles } from "../db/schema";
 import { assignArticleEvent } from "./events";
-import { FetchError, articlesFor } from "./fetch";
+import { FetchError, fetchArticles } from "./fetch";
 import { resolveArticleImage } from "./image";
 import {
-  formatAiError,
-  keepFromPolish,
-  polishArticle,
-  type PolishResult,
+    formatAiError,
+    keepFromPolish,
+    polishArticle,
+    type PolishResult,
 } from "./polish";
 import { shouldSkipHeuristically } from "./skip";
 import { SOURCES } from "./sources";
@@ -53,7 +53,7 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
   const fetched = await Promise.all(
     SOURCES.map(async (source) => {
       try {
-        const parsed = await articlesFor(source);
+        const parsed = await fetchArticles(source);
         const items = parsed.flatMap((article) => {
           if (shouldSkipHeuristically(article.title, article.url)) return [];
           return [
@@ -76,7 +76,7 @@ export async function runIngest(env: CloudflareBindings, db: Db): Promise<Ingest
               ? error.message
               : "fetch failed";
         console.error("[ingest] source", source.id, message);
-        return { source, error: message, items: [] as typeof candidates };
+        return { source, error: message, items: [] };
       }
     }),
   );

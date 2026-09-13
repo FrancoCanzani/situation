@@ -4,22 +4,34 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { getRouteApi } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type RefObject } from "react";
 
-import type { NewsPage } from "@shared/types";
+import type { Category, FeedSort, NewsPage } from "@shared/types";
+import { CATEGORIES } from "@shared/types";
 
-import { isCategoryTopic, type FeedTopic } from "./topics";
+import { isCategoryTopic, parseCats, type FeedTopic } from "./topics";
+
+const routeApi = getRouteApi("/");
 
 async function fetchNewsPage({
   pageParam,
+  sort,
   topic,
+  cats,
 }: {
   pageParam: string | null;
+  sort: FeedSort;
   topic: FeedTopic;
+  cats: Category[];
 }): Promise<NewsPage> {
-  const params = new URLSearchParams({ limit: "30" });
+  const params = new URLSearchParams({ limit: "30", sort });
   if (pageParam) params.set("cursor", pageParam);
-  if (isCategoryTopic(topic)) params.set("category", topic);
+  if (isCategoryTopic(topic)) {
+    params.set("category", topic);
+  } else if (cats.length < CATEGORIES.length) {
+    params.set("categories", cats.join(","));
+  }
   const response = await fetch(`/api/news?${params}`);
   if (!response.ok) throw new Error("Failed to load news");
   return response.json();
@@ -39,10 +51,15 @@ export function useTopicNews(
   enabled: boolean,
   scrollRef: RefObject<HTMLElement | null>,
 ) {
+  const { sort, cats: catsParam } = routeApi.useSearch();
+  const cats = topic === "all" ? parseCats(catsParam) : [...CATEGORIES];
+  const catsKey = cats.join(",");
   const queryClient = useQueryClient();
   const enterTimeoutRef = useRef(0);
   const [atTop, setAtTop] = useState(true);
   const [enteringIds, setEnteringIds] = useState<Set<string>>(() => new Set());
+
+  const queryKey = ["news", topic, sort, catsKey] as const;
 
   const {
     data,
@@ -52,8 +69,9 @@ export function useTopicNews(
     isFetching,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ["news", topic],
-    queryFn: ({ pageParam }) => fetchNewsPage({ pageParam, topic }),
+    queryKey,
+    queryFn: ({ pageParam }) =>
+      fetchNewsPage({ pageParam, sort, topic, cats }),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled,
@@ -69,8 +87,8 @@ export function useTopicNews(
   const headId = items[0]?.id ?? null;
 
   const { data: latest } = useQuery({
-    queryKey: ["news", topic, "latest"],
-    queryFn: () => fetchNewsPage({ pageParam: null, topic }),
+    queryKey: [...queryKey, "latest"],
+    queryFn: () => fetchNewsPage({ pageParam: null, sort, topic, cats }),
     enabled: enabled && Boolean(headId),
     refetchInterval: 60_000,
     refetchOnWindowFocus: true,
@@ -93,7 +111,7 @@ export function useTopicNews(
     }
 
     queryClient.setQueryData<InfiniteData<NewsPage, string | null>>(
-      ["news", topic],
+      queryKey,
       {
         pages: [page],
         pageParams: [null],

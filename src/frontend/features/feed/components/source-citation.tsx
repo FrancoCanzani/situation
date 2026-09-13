@@ -5,10 +5,13 @@ import type { NewsDetail } from "@shared/types";
 
 import { Loading } from "@/components/loading";
 import {
-    HoverCard,
-    HoverCardContent,
-    HoverCardTrigger,
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { cn } from "@/lib/utils";
+
+import { SourceList } from "./source-list";
 
 async function fetchNewsDetail(id: string): Promise<NewsDetail> {
   const response = await fetch(`/api/news/${id}`);
@@ -16,12 +19,20 @@ async function fetchNewsDetail(id: string): Promise<NewsDetail> {
   return response.json();
 }
 
+function sourceLabel(names: string[]): string {
+  const primary = names[0] ?? "Source";
+  if (names.length <= 1) return primary;
+  return `${primary} + others`;
+}
+
 export function SourceCitation({
   eventId,
   sourceNames,
+  className,
 }: {
   eventId: string;
   sourceNames: string[];
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const detailQuery = useQuery({
@@ -31,42 +42,31 @@ export function SourceCitation({
     staleTime: 60_000,
   });
 
-  const label = sourceNames[0] ?? "Source";
-
   return (
     <HoverCard onOpenChange={setOpen} open={open}>
       <HoverCardTrigger
-        className="text-muted-foreground hover:text-blue-600"
+        className={cn(
+          "inline text-muted-foreground hover:text-foreground",
+          className,
+        )}
         closeDelay={100}
         delay={200}
         onClick={(event) => event.stopPropagation()}
         render={<button type="button" />}
       >
-        {label}
+        {sourceLabel(sourceNames)}
       </HoverCardTrigger>
-      <HoverCardContent align="start" className="w-56 p-2" side="top" sideOffset={6}>
+      <HoverCardContent align="start" className="w-64 p-1" side="top" sideOffset={6}>
         {detailQuery.isLoading ? (
-          <Loading />
+          <div className="px-2 py-1.5">
+            <Loading />
+          </div>
         ) : detailQuery.isError ? (
-          <p className="text-muted-foreground">Could not load sources.</p>
+          <p className="px-2 py-1.5 text-muted-foreground">
+            Could not load sources.
+          </p>
         ) : (
-          <ul className="space-y-2">
-            {detailQuery.data?.sources.map((source) => (
-              <li key={source.id}>
-                <a
-                  className="block hover:text-blue-600"
-                  href={source.url}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <span className="block text-muted-foreground">
-                    {source.sourceName}
-                  </span>
-                  <span className="block text-foreground">{source.title}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
+          <SourceList sources={detailQuery.data?.sources ?? []} />
         )}
       </HoverCardContent>
     </HoverCard>

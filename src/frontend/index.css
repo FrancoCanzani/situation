@@ -24,8 +24,8 @@
   --input: #e8e8e8;
   --ring: #a3a3a3;
   --radius: 0.375rem;
-  --font-sans: "IBM Plex Mono", ui-monospace, monospace;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
   --font-pixel: "Geist Pixel", ui-monospace, monospace;
 }
 
@@ -50,8 +50,8 @@
 }
 
 @theme inline {
-  --font-sans: "IBM Plex Mono", ui-monospace, monospace;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
   --font-pixel: "Geist Pixel", ui-monospace, monospace;
   --animate-tape: tape 72s linear infinite;
   --color-ring: var(--ring);

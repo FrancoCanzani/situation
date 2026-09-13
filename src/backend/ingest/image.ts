@@ -35,6 +35,6 @@ export async function resolveArticleImage(input: {
 }): Promise<string | undefined> {
   const fromFeed = httpImageUrl(input.feedImage);
   if (fromFeed) return fromFeed;
-  if ((input.importance ?? 0) <= 9) return undefined;
+  if ((input.importance ?? 0) <= 8) return undefined;
   return fetchOgImage(input.pageUrl);
 }

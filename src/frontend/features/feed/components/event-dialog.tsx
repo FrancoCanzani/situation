@@ -6,10 +6,12 @@ import { Loading } from "@/components/loading";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { countryName } from "@/lib/country-name";
+
+import { SourceList } from "./source-list";
 
 async function fetchNewsDetail(id: string): Promise<NewsDetail> {
   const response = await fetch(`/api/news/${id}`);
@@ -62,6 +64,7 @@ export function EventDialog({
   const sources = detail?.sources ?? [];
   const when = detail?.bumpedAt ?? item?.bumpedAt ?? item?.lastSeenAt ?? "";
   const imageUrl = detail?.imageUrl ?? item?.imageUrl;
+  const country = countryName(detail?.countryCode ?? item?.countryCode);
 
   return (
     <Dialog
@@ -71,18 +74,23 @@ export function EventDialog({
       open={open}
     >
       <DialogContent className="max-h-[min(40rem,90svh)] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="font-bold leading-snug">{title}</DialogTitle>
-          <DialogDescription>
-            {item?.updated ? "Updated · " : null}
-            {when ? formatTime(when) : null}
-          </DialogDescription>
+        <DialogHeader className="gap-1">
+          <DialogTitle className="leading-snug">{title}</DialogTitle>
+          <div className="text-sm text-muted-foreground">
+            {country ? <span>{country}</span> : null}
+            {country && when ? " · " : null}
+            {when ? (
+              <time className="tabular-nums" dateTime={when}>
+                {formatTime(when)}
+              </time>
+            ) : null}
+          </div>
         </DialogHeader>
 
         {imageUrl ? (
           <img
             alt=""
-            className="aspect-[16/9] w-full object-cover"
+            className="aspect-video w-full rounded object-cover"
             src={imageUrl}
           />
         ) : null}
@@ -90,7 +98,7 @@ export function EventDialog({
         {summary ? <p>{summary}</p> : null}
 
         <div>
-          <p className="mb-2 text-muted-foreground">Developments</p>
+          <p className="mb-1 text-muted-foreground">Developments</p>
           {detailQuery.isLoading ? (
             <Loading />
           ) : detailQuery.isError ? (
@@ -98,29 +106,12 @@ export function EventDialog({
           ) : sources.length === 0 ? (
             <p className="text-muted-foreground">No sources yet.</p>
           ) : (
-            <ol className="space-y-3">
-              {sources.map((source) => (
-                <li key={source.id}>
-                  <time
-                    className="block text-muted-foreground tabular-nums"
-                    dateTime={source.publishedAt}
-                  >
-                    {formatTime(source.publishedAt)}
-                  </time>
-                  <a
-                    className="mt-0.5 block hover:text-blue-600"
-                    href={source.url}
-                    rel="noreferrer"
-                    target="_blank"
-                  >
-                    <span className="block">{source.title}</span>
-                    <span className="block text-muted-foreground">
-                      {source.sourceName}
-                    </span>
-                  </a>
-                </li>
-              ))}
-            </ol>
+            <SourceList
+              className="-mx-2"
+              formatTime={formatTime}
+              showTime
+              sources={sources}
+            />
           )}
         </div>
       </DialogContent>
