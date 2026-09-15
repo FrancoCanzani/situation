@@ -70,7 +70,7 @@ export function TopicColumn({
   return (
     <section
       className={cn(
-        "h-full min-h-0 shrink-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-r",
+        "h-full min-h-0 shrink-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-r scrollbar-none",
         soloOnMobile ? "flex w-full md:w-80" : "hidden w-80 md:flex",
       )}
       id={`column-${topic}`}
